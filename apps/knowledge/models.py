@@ -407,19 +407,22 @@ class EmbeddingProfile(AbstractBaseModel):
         target_timeout = timeout_seconds or self.connection_timeout_seconds or 10
 
         headers = {"Authorization": f"Bearer {target_key}"} if target_key else {}
+        headers["Content-Type"] = "application/json"
+        request_body = {}
         client_kwargs = {"timeout": target_timeout, "trust_env": False}
         if target_proxy:
             client_kwargs["proxy"] = target_proxy
 
-        trace(f"GET {target_url}")
+        trace(f"POST {target_url}")
         trace(f"Proxy: {target_proxy or 'none'}")
         trace(f"Authorization header: {'Bearer ****' + target_key[-4:] if target_key else 'not sent (no API key)'}")
         trace(f"Timeout: {target_timeout}s")
+        trace(f"Body: {request_body}")
 
         started = time.perf_counter()
         try:
             with httpx.Client(**client_kwargs) as client:
-                response = client.get(target_url, headers=headers)
+                response = client.post(target_url, headers=headers, json=request_body)
             latency_ms = int((time.perf_counter() - started) * 1000)
             trace(f"Response received in {latency_ms}ms")
             trace(f"Status: {response.status_code} {response.reason_phrase}")
