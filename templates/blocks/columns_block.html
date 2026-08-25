@@ -1,0 +1,10 @@
+{% load wagtailcore_tags %}
+
+<div class="columns-block row">
+    <div class="column column-left col-md-6">
+        {% include_block value.left_content %}
+    </div>
+    <div class="column column-right col-md-6">
+        {% include_block value.right_content %}
+    </div>
+</div>

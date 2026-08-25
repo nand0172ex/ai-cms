@@ -1,0 +1,23 @@
+{% load wagtailcore_tags %}
+
+<div class="accordion-block accordion" id="accordion-{{ block.id|default:'block' }}">
+    {% for item in value.items %}
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button {% if forloop.first %}{% else %}collapsed{% endif %}" 
+                        type="button" data-bs-toggle="collapse" 
+                        data-bs-target="#collapse-{{ forloop.counter }}"
+                        aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}">
+                    {{ item.value.title }}
+                </button>
+            </h2>
+            <div id="collapse-{{ forloop.counter }}" 
+                 class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" 
+                 data-bs-parent="#accordion-{{ block.id|default:'block' }}">
+                <div class="accordion-body">
+                    {{ item.value.content|richtext }}
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+</div>

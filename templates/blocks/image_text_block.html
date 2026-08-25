@@ -1,0 +1,9 @@
+{% load wagtailimages_tags wagtailcore_tags %}
+
+<div class="image-text-block image-text-{{ value.position }}">
+    {% image value.image width-400 as img %}
+    <img src="{{ img.url }}" alt="" class="image-text-image">
+    <div class="image-text-content">
+        {{ value.text|richtext }}
+    </div>
+</div>

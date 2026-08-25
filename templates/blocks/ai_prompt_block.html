@@ -1,0 +1,18 @@
+{% load wagtailcore_tags %}
+
+<div class="ai-prompt-block">
+    {% if value.title %}
+        <h3 class="ai-prompt-title">{{ value.title }}</h3>
+    {% endif %}
+    {% if value.instruction %}
+        <p class="ai-prompt-instruction">{{ value.instruction }}</p>
+    {% endif %}
+    <div id="ai-prompt-{{ block.id|default:'block' }}" class="ai-prompt-container">
+        <p class="text-muted">
+            <em>AI Prompt Interface - To be implemented in Phase 8</em>
+        </p>
+        <div class="alert alert-info">
+            This block will contain an interactive AI prompt/chat interface once Phase 8 (AI Integration) is completed.
+        </div>
+    </div>
+</div>

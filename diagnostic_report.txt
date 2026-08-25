@@ -1,0 +1,234 @@
+
+==========================================================
+🔍 AI CMS Phase 2 - Error Diagnostic Report
+==========================================================
+
+Generated: Mon 24 Aug 2026 09:59:27 AM CEST
+Location: /home/Nandprakash.Goutam1/Downloads/ai-cms
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 1. Python & Virtual Environment
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Python version:
+Python 3.12.3
+
+Virtual environment:
+✅ Active: /home/Nandprakash.Goutam1/Downloads/ai-cms/.venv
+
+Python executable:
+/home/Nandprakash.Goutam1/Downloads/ai-cms/.venv/bin/python
+
+pip version:
+pip 24.0 from /home/Nandprakash.Goutam1/Downloads/ai-cms/.venv/lib/python3.12/site-packages/pip (python 3.12)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 2. Django Configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5.2.17
+
+  File "<string>", line 1
+    import os; print(os.environ.get(\"DJANGO_SETTINGS_MODULE\", \"Not set\"))
+                                     ^
+SyntaxError: unexpected character after line continuation character
+Settings module: 
+
+Python path:
+
+/usr/lib/python312.zip
+/usr/lib/python3.12
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 3. Django System Checks
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+System check identified no issues (0 silenced).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 4. Database Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Database file:
+-rw-r--r-- 1 Nandprakash.Goutam1 Nandprakash.Goutam1 1.2M Aug 24 09:50 db.sqlite3
+
+Database type:
+63 objects imported automatically (use -v 2 for details).
+
+Engine: django.db.backends.sqlite3
+Name: db.sqlite3
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 5. Migration Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[X]  contenttypes.0001_initial
+[X]  auth.0001_initial
+[X]  admin.0001_initial
+[X]  admin.0002_logentry_remove_auto_add
+[X]  admin.0003_logentry_add_action_flag_choices
+[X]  contenttypes.0002_remove_content_type_name
+[X]  auth.0002_alter_permission_name_max_length
+[X]  auth.0003_alter_user_email_max_length
+[X]  auth.0004_alter_user_username_opts
+[X]  auth.0005_alter_user_last_login_null
+[X]  auth.0006_require_contenttypes_0002
+[X]  auth.0007_alter_validators_add_error_messages
+[X]  auth.0008_alter_user_username_max_length
+[X]  auth.0009_alter_user_last_name_max_length
+[X]  auth.0010_alter_group_name_max_length
+[X]  auth.0011_update_proxy_permissions
+[X]  auth.0012_alter_user_first_name_max_length
+[X]  wagtailcore.0001_squashed_0016_change_page_url_path_to_text_field
+[X]  wagtailcore.0017_change_edit_page_permission_description
+[X]  wagtailcore.0018_pagerevision_submitted_for_moderation_index
+[X]  wagtailcore.0019_verbose_names_cleanup
+[X]  wagtailcore.0020_add_index_on_page_first_published_at
+[X]  wagtailcore.0021_capitalizeverbose
+[X]  wagtailcore.0022_add_site_name
+[X]  wagtailcore.0023_alter_page_revision_on_delete_behaviour
+[X]  wagtailcore.0024_collection
+[X]  wagtailcore.0025_collection_initial_data
+[X]  wagtailcore.0026_group_collection_permission
+[X]  taggit.0001_initial
+[X]  wagtailimages.0001_squashed_0021
+
+Unapplied migrations:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 6. Installed Apps
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+63 objects imported automatically (use -v 2 for details).
+
+Total apps: 45
+
+Local apps (ai-cms):
+  ✅ apps.accounts
+  ✅ apps.ai_providers
+  ✅ apps.api
+  ✅ apps.audit
+  ✅ apps.branding
+  ✅ apps.connectors
+  ✅ apps.conversations
+  ✅ apps.core
+  ✅ apps.ingestion
+  ✅ apps.knowledge
+  ✅ apps.navigation
+  ✅ apps.observability
+  ✅ apps.prompts
+  ✅ apps.retrieval
+  ✅ apps.tenants
+  ✅ apps.workflows
+  ✅ home
+  ✅ search
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 7. Admin User Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+63 objects imported automatically (use -v 2 for details).
+
+✅ Admin users found:
+   - admin (admin@example.com)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 8. CMS Models Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+63 objects imported automatically (use -v 2 for details).
+
+Page Models:
+  ✅ HomePage: 1 records
+  ✅ StandardPage: 1 records
+  ✅ LandingPage: 0 records
+  ✅ AIAssistantPage: 0 records
+  ✅ KnowledgeBasePage: 0 records
+
+Navigation Models:
+  ✅ Menu: 1 records
+  ✅ MenuItem: 4 records
+
+Branding Models:
+  ✅ BrandingSettings: 0 records
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 9. Static Files
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Static root configured:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/Nandprakash.Goutam1/Downloads/ai-cms/.venv/lib/python3.12/site-packages/django/conf/__init__.py", line 81, in __getattr__
+    self._setup(name)
+  File "/home/Nandprakash.Goutam1/Downloads/ai-cms/.venv/lib/python3.12/site-packages/django/conf/__init__.py", line 61, in _setup
+    raise ImproperlyConfigured(
+django.core.exceptions.ImproperlyConfigured: Requested setting STATIC_ROOT, but settings are not configured. You must either define the environment variable DJANGO_SETTINGS_MODULE or call settings.configure() before accessing settings.
+
+Static files collected:
+  ⚠️  Run: python manage.py collectstatic
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 10. Environment Variables
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Key settings from .env:
+  DJANGO_SETTINGS_MODULE=config.settings.dev
+  DJANGO_DEBUG=True
+  DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+  DATABASE_URL=sqlite:///db.sqlite3
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 11. Template Configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/Nandprakash.Goutam1/Downloads/ai-cms/.venv/lib/python3.12/site-packages/django/conf/__init__.py", line 81, in __getattr__
+    self._setup(name)
+  File "/home/Nandprakash.Goutam1/Downloads/ai-cms/.venv/lib/python3.12/site-packages/django/conf/__init__.py", line 61, in _setup
+    raise ImproperlyConfigured(
+django.core.exceptions.ImproperlyConfigured: Requested setting TEMPLATES, but settings are not configured. You must either define the environment variable DJANGO_SETTINGS_MODULE or call settings.configure() before accessing settings.
+TEMPLATES directories:
+  ⚠️  Could not read templates
+
+Template files in templates/blocks/:
+   block templates found 16
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 12. Port 8000 Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Checking if port 8000 is in use:
+  ⚠️  Port 8000 is NOT listening
+  Run: python manage.py runserver localhost:8000
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 13. File Permissions
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Database write permissions:
+  ✅ db.sqlite3 writable
+
+Media directory:
+  ✅ media/ created
+
+Static directory:
+  ⚠️  static/ missing (run collectstatic)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 14. URL Configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+63 objects imported automatically (use -v 2 for details).
+
+✅ URL configuration loaded
+
+Key URL patterns:
+  ✅ admin: /admin/
+  ✅ home: /
+  ✅ wagtail: /cms/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ If all items above show ✅, the installation is correct
+
+🌐 To access the application:
+  1. Run server: python manage.py runserver localhost:8000
+  2. Open browser: http://localhost:8000/admin/
+  3. Login: admin / admin123
+
+❌ If you see any ❌ errors above, share the output and we'll fix it!
+
+==========================================================
+✨ Diagnostic complete!
+==========================================================
+

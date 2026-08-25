@@ -1,0 +1,8 @@
+{% load static %}
+
+<div class="code-block">
+    <div class="code-header">
+        <span class="code-language">{{ value.language }}</span>
+    </div>
+    <pre><code class="language-{{ value.language }} highlight">{{ value.code }}</code></pre>
+</div>

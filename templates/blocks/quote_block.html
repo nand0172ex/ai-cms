@@ -1,0 +1,8 @@
+{% load wagtailcore_tags %}
+
+<blockquote class="quote-block text-{{ value.alignment }}">
+    <p class="quote-text">{{ value.text }}</p>
+    {% if value.attribution %}
+        <footer class="quote-attribution">— {{ value.attribution }}</footer>
+    {% endif %}
+</blockquote>

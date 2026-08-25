@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Issue Triage Assistant</title>
+  <style>
+    :root {
+      --brand-red: #cc0000;
+      --brand-red-dark: #9f0000;
+      --bg: #eef1f7;
+      --panel: #ffffff;
+      --muted: #5f6b7a;
+      --border: #dde3ee;
+      --ok: #16a34a;
+      --warn: #ea580c;
+      --risk: #dc2626;
+      --shadow: 0 14px 38px rgba(17, 24, 39, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: radial-gradient(circle at top left, #f9fbff 0, #eef1f7 45%, #e7ebf3 100%);
+      color: #162033;
+    }
+
+    .topbar {
+      background: linear-gradient(90deg, var(--brand-red-dark), var(--brand-red));
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(185, 0, 0, 0.25);
+    }
+
+    .topbar-inner {
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--brand-red);
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.1;
+    }
+
+    .brand p {
+      margin: 2px 0 0;
+      font-size: 13px;
+      opacity: 0.95;
+    }
+
+    .clear-btn {
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+
+    .page {
+      max-width: 1140px;
+      margin: 22px auto;
+      padding: 0 16px 26px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card-head {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #fff, #f9fbff);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-head h2 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .badge {
+      background: var(--brand-red);
+      color: #fff;
+      font-size: 11px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .mode-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #ebc6c6;
+      background: #fff7f7;
+      border-radius: 999px;
+      padding: 5px 8px;
+    }
+
+    .mode-toggle span {
+      font-size: 11px;
+      color: #7a2f2f;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .mode-toggle label {
+      font-size: 12px;
+      color: #5b3040;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .content {
+      padding: 16px;
+    }
+
+    .hint {
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .search-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: start;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 108px;
+      resize: vertical;
+      padding: 12px;
+      border: 1px solid #ccd5e4;
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    textarea:focus {
+      outline: 2px solid #cfe0ff;
+      border-color: #8ab0f3;
+    }
+
+    .analyse-btn {
+      border: none;
+      background: var(--brand-red);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 104px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+
+    .analyse-btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0 10px;
+    }
+
+    .chip {
+      background: #fff;
+      border: 1px solid #d4dceb;
+      border-radius: 999px;
+      font-size: 12px;
+      color: #2f3d57;
+      padding: 7px 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .chip:hover { border-color: #91ade0; color: #17376b; }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #fff;
+      margin-top: 10px;
+      overflow: hidden;
+    }
+
+    .panel h3 {
+      margin: 0;
+      padding: 10px 12px;
+      background: #f8fbff;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    .rows { padding: 6px; }
+
+    .incident-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid #e4e9f4;
+      border-radius: 10px;
+      padding: 9px 10px;
+      margin-bottom: 6px;
+      background: #fff;
+    }
+
+    .incident-row strong {
+      color: var(--brand-red);
+      font-size: 13px;
+      display: inline-block;
+      margin-right: 8px;
+    }
+
+    .incident-row .meta {
+      color: #41506b;
+      font-size: 13px;
+    }
+
+    .score {
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .score.good { color: var(--ok); }
+    .score.mid { color: var(--warn); }
+    .score.low { color: var(--risk); }
+
+    .grid {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 10px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .metric {
+      border: 1px solid #dce4f1;
+      border-radius: 10px;
+      padding: 9px;
+      background: #fbfdff;
+    }
+
+    .metric .k {
+      color: #60718f;
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .metric .v {
+      margin-top: 4px;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .summary-box {
+      border: 1px solid #d6e0ef;
+      border-left: 4px solid #4f7ed3;
+      border-radius: 8px;
+      background: #f4f8ff;
+      padding: 10px;
+      color: #263447;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .bullets {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: #2f405c;
+      font-size: 13px;
+    }
+
+    .rca-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .rca-item {
+      border: 1px solid #f1d7d7;
+      border-radius: 10px;
+      background: #fff8f8;
+      padding: 8px;
+      font-size: 12px;
+      color: #5a2630;
+    }
+
+    .rca-item .ttl {
+      color: var(--brand-red-dark);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status {
+      margin-top: 8px;
+      padding: 7px 10px;
+      border: 1px solid #d6deec;
+      border-radius: 8px;
+      background: #f7faff;
+      font-size: 12px;
+      color: #36507b;
+    }
+
+    .loading {
+      padding: 12px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 880px) {
+      .brand h1 { font-size: 20px; }
+      .grid { grid-template-columns: 1fr; }
+      .mini-grid { grid-template-columns: 1fr 1fr; }
+      .rca-grid { grid-template-columns: 1fr; }
+      .search-row { grid-template-columns: 1fr; }
+      .analyse-btn { width: 100%; }
+      .mode-toggle { border-radius: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark">V</div>
+        <div>
+          <h1>Vodafone FusionC AI Issue Triage Assistant</h1>
+          <p>Issue triaging template: search historical defects/incidents, match patterns, suggest RCA and recommended actions.</p>
+        </div>
+      </div>
+      <button class="clear-btn" id="clearPageBtn">CLEAR PAGE</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="card">
+      <div class="card-head">
+        <h2>Issue / Error / Incident Search</h2>
+        <div class="mode-toggle">
+          <span>Mode</span>
+          <label><input type="radio" name="demo-mode" value="on" checked> Demo ON</label>
+          <label><input type="radio" name="demo-mode" value="off"> Demo OFF</label>
+        </div>
+      </div>
+      <div class="content">
+        <p class="hint">Type error, issue statement, incident ID, defect ID, log symptom or business impact</p>
+
+        <div class="search-row">
+          <textarea id="promptInput" placeholder="Kafka replayed migration data after MSK upgrade. Customer records overwritten. Billing and ordering impacted."></textarea>
+          <button class="analyse-btn" id="analyseBtn">ANALYSE</button>
+        </div>
+
+        <div class="chips" id="chips"></div>
+
+        <div class="panel">
+          <h3>Suggested matching incidents/defects while typing</h3>
+          <div class="rows" id="suggestionsRows"></div>
+        </div>
+
+        <div class="grid" id="analysisGrid" style="display: none;">
+          <div>
+            <div class="panel">
+              <h3>Best Incident Match</h3>
+              <div class="content">
+                <div class="mini-grid" id="bestMetrics"></div>
+                <div class="summary-box" id="bestSummary"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Similar Issues in Knowledge Base</h3>
+              <div class="rows" id="similarRows"></div>
+            </div>
+
+            <div class="panel">
+              <h3>Recommended Actions</h3>
+              <div class="content">
+                <ul class="bullets" id="actionsList"></ul>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Business Impact</h3>
+              <div class="content">
+                <ul class="bullets" id="impactList"></ul>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>RCA Summary</h3>
+              <div class="content">
+                <div class="rca-grid" id="rcaGrid"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>AI Assistant Output</h3>
+              <div class="content">
+                <div class="summary-box" id="aiAnswer"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="status" id="statusBar">Ready. Start typing to get smart incident matches.</div>
+      </div>
+      <div class="content muted" style="border-top: 1px solid var(--border);">No browser storage APIs are used. This page is safe for local browser demo and sandboxed preview.</div>
+    </section>
+  </main>
+
+  <script>
+    const INCIDENTS = [
+      {
+        id: "INC000099879642",
+        title: "Customer Data Override After MSK Upgrade Migration",
+        category: "Customer Data / Billing",
+        severity: "Critical",
+        owner: "Data Platform",
+        confidenceBase: 0.94,
+        keywords: ["kafka", "msk", "migration", "override", "billing", "customer", "order"],
+        impact: ["Customer profile corruption", "Incorrect billing outputs", "Order orchestration mismatch"],
+        actions: ["Freeze downstream billing jobs", "Rollback consumer group offsets", "Run compensating customer replay"],
+        rca: ["Topic replay window widened during failover", "Consumer dedupe key not applied", "Backfill run overlapped live traffic"]
+      },
+      {
+        id: "PROVENG-CHANGE-001",
+        title: "Wrong Carrier Assignment During Provider Change",
+        category: "Provider Change / Service Continuity",
+        severity: "Medium",
+        owner: "Provisioning",
+        confidenceBase: 0.78,
+        keywords: ["provider", "change", "provision", "sim", "routing", "assignment"],
+        impact: ["Port-in delays", "Provisioning retries", "Ticket escalation volume spike"],
+        actions: ["Pause change batches", "Apply corrected mapping table", "Re-run failed transitions"],
+        rca: ["Stale provider mapping cache", "Missing validation in migration script", "Rollback checkpoint skipped"]
+      },
+      {
+        id: "BILLING-P2-001",
+        title: "Incorrect Billing Following Data Override",
+        category: "Billing",
+        severity: "High",
+        owner: "Billing Ops",
+        confidenceBase: 0.72,
+        keywords: ["billing", "invoice", "charge", "override", "customer", "balance"],
+        impact: ["Overcharging risk", "Credit note workload", "Customer complaints"],
+        actions: ["Suspend invoice generation", "Run billing correction job", "Audit impacted accounts"],
+        rca: ["Rating input loaded from stale snapshot", "Offset rollback duplicated usage events", "Validation threshold disabled"]
+      },
+      {
+        id: "INVOICERECON-025",
+        title: "Invoice Reconciliation Drift After DB Refresh",
+        category: "Finance / Reconciliation",
+        severity: "Medium",
+        owner: "Finance Systems",
+        confidenceBase: 0.66,
+        keywords: ["invoice", "reconciliation", "refresh", "drift", "finance"],
+        impact: ["Month-end close delay", "Manual adjustments", "Ledger mismatch"],
+        actions: ["Compare snapshots", "Re-run reconciliation task", "Lock release until variance closes"],
+        rca: ["Incremental refresh skipped late updates", "Delta watermark reset", "No drift alert configured"]
+      },
+      {
+        id: "ACRM-CATALOG-204",
+        title: "ACRM Product Catalog Mismatch",
+        category: "Catalog / CRM",
+        severity: "Low",
+        owner: "CRM Team",
+        confidenceBase: 0.58,
+        keywords: ["acrm", "catalog", "crm", "product", "attribute"],
+        impact: ["Offer display mismatch", "Upsell conversion dip", "Support call increase"],
+        actions: ["Sync catalog version", "Purge edge cache", "Re-publish product map"],
+        rca: ["Partial publish aborted", "Schema field mapping drift", "Catalog checksum not verified"]
+      }
+    ];
+
+    const QUICK_CHIPS = [
+      "Kafka Data Override",
+      "CDH HTTP 500",
+      "Provider Change",
+      "Billing Fallout",
+      "Termination Fallout"
+    ];
+
+    const promptInput = document.getElementById("promptInput");
+    const analyseBtn = document.getElementById("analyseBtn");
+    const clearPageBtn = document.getElementById("clearPageBtn");
+    const chipsWrap = document.getElementById("chips");
+    const suggestionsRows = document.getElementById("suggestionsRows");
+    const analysisGrid = document.getElementById("analysisGrid");
+    const bestMetrics = document.getElementById("bestMetrics");
+    const bestSummary = document.getElementById("bestSummary");
+    const similarRows = document.getElementById("similarRows");
+    const impactList = document.getElementById("impactList");
+    const actionsList = document.getElementById("actionsList");
+    const rcaGrid = document.getElementById("rcaGrid");
+    const aiAnswer = document.getElementById("aiAnswer");
+    const statusBar = document.getElementById("statusBar");
+    const demoModeRadios = document.querySelectorAll('input[name="demo-mode"]');
+
+    let conversationId = null;
+
+    function isDemoModeOn() {
+      const checked = document.querySelector('input[name="demo-mode"]:checked');
+      return !checked || checked.value === "on";
+    }
+
+    function tokenize(text) {
+      return (text || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(Boolean);
+    }
+
+    function scoreIncident(queryTokens, incident) {
+      const tokenSet = new Set(queryTokens);
+      let hits = 0;
+      incident.keywords.forEach((keyword) => {
+        if (tokenSet.has(keyword)) {
+          hits += 1;
+        }
+      });
+      const overlap = incident.keywords.length ? hits / incident.keywords.length : 0;
+      const score = Math.min(0.99, incident.confidenceBase * 0.6 + overlap * 0.7);
+      return score;
+    }
+
+    function classifyScore(score) {
+      if (score >= 0.85) return { css: "good", pct: Math.round(score * 100) + "%" };
+      if (score >= 0.65) return { css: "mid", pct: Math.round(score * 100) + "%" };
+      return { css: "low", pct: Math.round(score * 100) + "%" };
+    }
+
+    function rankIncidents(query) {
+      const tokens = tokenize(query);
+      return INCIDENTS
+        .map((item) => ({ ...item, score: scoreIncident(tokens, item) }))
+        .sort((a, b) => b.score - a.score);
+    }
+
+    function renderSuggestions(query) {
+      if (!isDemoModeOn()) {
+        suggestionsRows.innerHTML = `
+          <div class="incident-row">
+            <div>
+              <strong>LIVE</strong>
+              <span class="meta">Demo OFF: suggestions prioritize real knowledge retrieval after analysis.</span>
+            </div>
+            <span class="score mid">Live</span>
+          </div>
+        `;
+        return;
+      }
+
+      const ranked = rankIncidents(query).slice(0, 4);
+      suggestionsRows.innerHTML = ranked.map((row) => {
+        const scoreView = classifyScore(row.score);
+        return `
+          <div class="incident-row">
+            <div>
+              <strong>${row.id}</strong>
+              <span class="meta">${row.title}<br>${row.category}</span>
+            </div>
+            <span class="score ${scoreView.css}">${scoreView.pct}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderSimilarIssues(ranked) {
+      similarRows.innerHTML = ranked.slice(1, 5).map((row) => {
+        const scoreView = classifyScore(row.score);
+        return `
+          <div class="incident-row">
+            <div>
+              <strong>${row.id}</strong>
+              <span class="meta">${row.title}<br>${row.category}</span>
+            </div>
+            <span class="score ${scoreView.css}">${scoreView.pct}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderLiveCitations(citations) {
+      suggestionsRows.innerHTML = `
+        <div class="incident-row">
+          <div>
+            <strong>LIVE</strong>
+            <span class="meta">Qdrant-only retrieval is active. Click ANALYSE to fetch dynamic context and citations.</span>
+          </div>
+          <span class="score good">Live</span>
+        </div>
+      `;
+      similarRows.innerHTML = citations.slice(1, 6).map((item, idx) => {
+        const score = Number(item.score || 0);
+        const scoreView = classifyScore(score);
+        return `
+          <div class="incident-row">
+            <div>
+              <strong>${item.source || `citation-${idx + 1}`}</strong>
+              <span class="meta">Chunk ${item.chunk_index ?? "n/a"}<br>Qdrant citation</span>
+            </div>
+            <span class="score ${scoreView.css}">${scoreView.pct}</span>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderBestMatch(best, aiText) {
+      const scoreView = classifyScore(best.score);
+      bestMetrics.innerHTML = `
+        <div class="metric"><div class="k">Best Incident ID</div><div class="v">${best.id}</div></div>
+        <div class="metric"><div class="k">Match Score</div><div class="v" style="color:${scoreView.css === "good" ? "#16a34a" : scoreView.css === "mid" ? "#ea580c" : "#dc2626"}">${scoreView.pct}</div></div>
+        <div class="metric"><div class="k">Severity</div><div class="v">${best.severity}</div></div>
+      `;
+      bestSummary.textContent = aiText;
+    }
+
+    function renderBulletList(target, items) {
+      target.innerHTML = items.map((item) => `<li>${item}</li>`).join("");
+    }
+
+    function renderRca(best) {
+      rcaGrid.innerHTML = `
+        <div class="rca-item"><div class="ttl">Recovery</div><div>${best.actions[0] || "Stabilize impacted services"}</div></div>
+        <div class="rca-item"><div class="ttl">Alerting</div><div>${best.rca[0] || "Strengthen anomaly thresholds"}</div></div>
+        <div class="rca-item"><div class="ttl">Control</div><div>Owner: ${best.owner}; Severity: ${best.severity}</div></div>
+      `;
+    }
+
+    function extractActionsFromAnswer(answerText, fallbackActions) {
+      const lines = (answerText || "").split("\n").map((line) => line.trim()).filter(Boolean);
+      const actionLines = lines.filter((line) => /action|recommend|step|mitigat|rollback|retry|fix/i.test(line));
+      const merged = actionLines.slice(0, 4);
+      if (merged.length > 0) {
+        return merged;
+      }
+      return fallbackActions;
+    }
+
+    async function analyzePrompt() {
+      const prompt = promptInput.value.trim();
+      if (!prompt) {
+        alert("Please enter issue details before analysis.");
+        return;
+      }
+
+      const ranked = rankIncidents(prompt);
+      const best = ranked[0];
+
+      if (isDemoModeOn()) {
+        analyseBtn.disabled = true;
+        analyseBtn.textContent = "ANALYZING...";
+        statusBar.textContent = "Demo mode: running local pattern matching...";
+
+        renderSuggestions(prompt);
+        analysisGrid.style.display = "grid";
+
+        // Demo mode is intentionally instant and does not call backend APIs.
+        const demoAnswer =
+          `Most likely historical match: ${best.id} (${classifyScore(best.score).pct}).\n` +
+          `${best.title}\n\n` +
+          `Likely RCA:\n- ${best.rca.join("\n- ")}\n\n` +
+          `Recommended actions:\n- ${best.actions.join("\n- ")}`;
+
+        renderBestMatch(best, demoAnswer);
+        renderSimilarIssues(ranked);
+        renderBulletList(impactList, best.impact);
+        renderBulletList(actionsList, best.actions);
+        renderRca(best);
+        aiAnswer.textContent = demoAnswer;
+
+        statusBar.textContent =
+          "Demo analysis complete instantly. Switch Demo OFF for live assistant and citations.";
+        analyseBtn.disabled = false;
+        analyseBtn.textContent = "ANALYSE";
+        return;
+      }
+
+      analyseBtn.disabled = true;
+      analyseBtn.textContent = "ANALYZING...";
+      statusBar.textContent = "Analyzing prompt, searching incident patterns, and generating RCA guidance...";
+
+      renderSuggestions(prompt);
+      analysisGrid.style.display = "grid";
+      aiAnswer.textContent = "Working on your request...";
+
+      let answer = "";
+      let apiError = null;
+      let citations = [];
+
+      try {
+        const response = await fetch("/api/v1/chat/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            conversation_id: conversationId
+          })
+        });
+
+        const payload = await response.json();
+        if (!response.ok) {
+          apiError = payload.error || "Unable to process prompt";
+        } else {
+          conversationId = payload.conversation_id;
+          answer = payload.answer || "No response returned by assistant.";
+          citations = payload.citations || [];
+        }
+      } catch (error) {
+        apiError = error.message || "Network error while calling chat API";
+      }
+
+      if (!isDemoModeOn()) {
+        const fallbackBest = {
+          id: "LIVE-RAG",
+          score: 0.91,
+          severity: "Dynamic",
+          owner: "AI Runtime",
+          impact: [
+            "Impact inferred from retrieval context",
+            "Use linked citations to verify affected domains",
+            "Escalate to owning team based on confidence",
+          ],
+          actions: [
+            "Review retrieved citations and validate scope",
+            "Create mitigation runbook from assistant output",
+            "Track follow-up actions in incident workflow",
+          ],
+          rca: [
+            "Derived from current query and retrieval context",
+          ],
+          title: "Live retrieval driven analysis",
+          category: "RAG",
+        };
+
+        const liveAnswer = apiError
+          ? "Assistant API error: " + apiError + "\n\nPlease verify provider and vector DB settings."
+          : answer;
+
+        renderBestMatch(fallbackBest, liveAnswer || "No answer returned.");
+        renderLiveCitations(citations);
+        renderBulletList(impactList, fallbackBest.impact);
+        renderBulletList(actionsList, extractActionsFromAnswer(liveAnswer || "", fallbackBest.actions));
+        renderRca(fallbackBest);
+        aiAnswer.textContent = liveAnswer || "No answer returned.";
+        statusBar.textContent = apiError
+          ? "Live mode completed with API error. Check AI provider connectivity."
+          : "Live mode completed with dynamic assistant output.";
+        analyseBtn.disabled = false;
+        analyseBtn.textContent = "ANALYSE";
+        return;
+      }
+
+      if (apiError) {
+        answer = "Assistant API error: " + apiError + "\n\nShowing triage from historical incident patterns only.";
+      }
+
+      renderBestMatch(best, answer);
+      renderSimilarIssues(ranked);
+      renderBulletList(impactList, best.impact);
+      renderBulletList(actionsList, extractActionsFromAnswer(answer, best.actions));
+      renderRca(best);
+      aiAnswer.textContent = answer;
+
+      statusBar.textContent = "Analysis complete. Best match " + best.id + " with confidence " + classifyScore(best.score).pct + ".";
+      analyseBtn.disabled = false;
+      analyseBtn.textContent = "ANALYSE";
+    }
+
+    function clearDashboard() {
+      promptInput.value = "";
+      suggestionsRows.innerHTML = "";
+      analysisGrid.style.display = "none";
+      bestMetrics.innerHTML = "";
+      bestSummary.textContent = "";
+      similarRows.innerHTML = "";
+      impactList.innerHTML = "";
+      actionsList.innerHTML = "";
+      rcaGrid.innerHTML = "";
+      aiAnswer.textContent = "";
+      statusBar.textContent = "Ready. Start typing to get smart incident matches.";
+      conversationId = null;
+      renderSuggestions("");
+    }
+
+    function initQuickChips() {
+      chipsWrap.innerHTML = QUICK_CHIPS.map((chip) => `<button class="chip" type="button">${chip}</button>`).join("");
+      chipsWrap.querySelectorAll(".chip").forEach((button) => {
+        button.addEventListener("click", () => {
+          promptInput.value = button.textContent;
+          renderSuggestions(button.textContent);
+        });
+      });
+    }
+
+    promptInput.addEventListener("input", () => {
+      renderSuggestions(promptInput.value);
+    });
+
+    promptInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        analyzePrompt();
+      }
+    });
+
+    analyseBtn.addEventListener("click", analyzePrompt);
+    clearPageBtn.addEventListener("click", clearDashboard);
+
+    demoModeRadios.forEach((radio) => {
+      radio.addEventListener("change", () => {
+        clearDashboard();
+        statusBar.textContent = isDemoModeOn()
+          ? "Demo mode ON. Pattern-ranking blocks are enabled."
+          : "Demo mode OFF. Results are driven by live assistant output.";
+      });
+    });
+
+    initQuickChips();
+    renderSuggestions("");
+  </script>
+</body>
+</html>

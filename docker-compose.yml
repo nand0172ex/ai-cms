@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-cms-postgres
+    environment:
+      POSTGRES_DB: ai_cms
+      POSTGRES_USER: ai_cms_user
+      POSTGRES_PASSWORD: ai_cms_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_cms_user -d ai_cms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-cms-network
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: ai-cms-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-cms-network
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai-cms-qdrant
+    environment:
+      QDRANT_API_KEY: qdrant-api-key
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-cms-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+
+networks:
+  ai-cms-network:
+    driver: bridge
+
+# Usage:
+# Start all services:
+#   docker-compose up -d
+#
+# Stop all services:
+#   docker-compose down
+#
+# View logs:
+#   docker-compose logs -f
+#
+# Connect from host:
+#   - PostgreSQL: localhost:5432 (ai_cms_user / ai_cms_password)
+#   - Redis: localhost:6379
+#   - Qdrant: localhost:6333 (key: qdrant-api-key)
+#
+# Update .env to use:
+#   DATABASE_URL=postgres://ai_cms_user:ai_cms_password@localhost:5432/ai_cms
+#   REDIS_URL=redis://localhost:6379/0
+#   QDRANT_URL=http://localhost:6333
+#   QDRANT_API_KEY=qdrant-api-key

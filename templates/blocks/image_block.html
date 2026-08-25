@@ -1,0 +1,9 @@
+{% load wagtailimages_tags %}
+
+<figure class="image-block">
+    {% image value.image width-600 as img %}
+    <img src="{{ img.url }}" alt="{{ value.alt_text }}" class="image-block-img">
+    {% if value.caption %}
+        <figcaption class="image-caption">{{ value.caption }}</figcaption>
+    {% endif %}
+</figure>

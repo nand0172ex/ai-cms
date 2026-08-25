@@ -1,0 +1,17 @@
+{% load wagtailimages_tags %}
+
+<div class="hero-block">
+    {% image value.background_image width-1200 as bg_img %}
+    <div class="hero-background" style="background-image: url('{{ bg_img.url }}');">
+        <div class="hero-overlay" style="opacity: {{ value.overlay_opacity|add:0|floatformat:2 }}%; background-color: rgba(0, 0, 0, 1);"></div>
+    </div>
+    <div class="hero-content">
+        <h1 class="hero-title">{{ value.title }}</h1>
+        {% if value.subtitle %}
+            <p class="hero-subtitle">{{ value.subtitle }}</p>
+        {% endif %}
+        {% if value.button_text and value.button_url %}
+            <a href="{{ value.button_url }}" class="btn btn-primary btn-lg">{{ value.button_text }}</a>
+        {% endif %}
+    </div>
+</div>

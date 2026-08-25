@@ -1,0 +1,73 @@
+from django.urls import path
+
+from apps.knowledge import views
+
+app_name = "knowledge"
+
+urlpatterns = [
+    path(
+        "api/v1/knowledge-bases/<slug:slug>/stats/",
+        views.knowledge_base_collection_stats,
+        name="knowledge_base_collection_stats",
+    ),
+    path(
+        "api/v1/vector-db/dashboard/",
+        views.vector_db_dashboard,
+        name="vector_db_dashboard",
+    ),
+    path(
+        "api/v1/vector-db/collections/",
+        views.vector_db_collections,
+        name="vector_db_collections",
+    ),
+    path(
+        "api/v1/vector-db/collections/<slug:slug>/",
+        views.vector_db_collection_detail,
+        name="vector_db_collection_detail",
+    ),
+    path(
+        "api/v1/vector-db/uploads/status/",
+        views.vector_db_upload_status,
+        name="vector_db_upload_status",
+    ),
+    path(
+        "api/v1/vector-db/sync/status/",
+        views.vector_db_sync_status,
+        name="vector_db_sync_status",
+    ),
+    path(
+        "api/v1/vector-db/sync/<int:connector_id>/resync/",
+        views.vector_db_manual_resync,
+        name="vector_db_manual_resync",
+    ),
+    path(
+        "api/v1/vector-db/embeddings/monitor/",
+        views.vector_db_embedding_monitor,
+        name="vector_db_embedding_monitor",
+    ),
+    path(
+        "api/v1/vector-db/search-playground/",
+        views.vector_db_search_playground,
+        name="vector_db_search_playground",
+    ),
+    path(
+        "api/v1/vector-db/system-monitoring/",
+        views.vector_db_system_monitoring,
+        name="vector_db_system_monitoring",
+    ),
+    path(
+        "api/v1/vector-db/connection/",
+        views.vector_db_connection,
+        name="vector_db_connection",
+    ),
+    path(
+        "api/v1/embedding-profiles/",
+        views.embedding_profiles,
+        name="embedding_profiles",
+    ),
+    path(
+        "api/v1/embedding-profiles/<slug:slug>/connection/",
+        views.embedding_profile_connection,
+        name="embedding_profile_connection",
+    ),
+]

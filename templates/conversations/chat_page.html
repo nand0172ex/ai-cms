@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ assistant.name }} Chat</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 24px; background: #f7f9fb; }
+    .wrap { max-width: 860px; margin: 0 auto; }
+    .panel { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+    h1 { margin-top: 0; }
+    textarea, button { width: 100%; padding: 10px; margin-top: 10px; }
+    .response { white-space: pre-wrap; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>{{ assistant.name }}</h1>
+      <p>{{ assistant.description }}</p>
+      <form id="chat-form">
+        <textarea id="prompt" rows="4" placeholder="Ask a question"></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <div id="response" class="response"></div>
+
+      <hr>
+      <h2>Upload File to Knowledge Base</h2>
+      <form id="upload-form" enctype="multipart/form-data">
+        <input id="upload-file" name="file" type="file" required>
+        <input id="upload-kb" name="knowledge_base_slug" type="text" placeholder="Knowledge base slug (optional)">
+        <button type="submit">Upload and Index</button>
+      </form>
+      <div id="upload-status" class="response"></div>
+    </div>
+  </div>
+  <script>
+    const form = document.getElementById('chat-form');
+    const responseEl = document.getElementById('response');
+    const uploadForm = document.getElementById('upload-form');
+    const uploadStatusEl = document.getElementById('upload-status');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const prompt = document.getElementById('prompt').value;
+      const res = await fetch('/api/v1/chat/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({assistant_slug: '{{ assistant.slug }}', prompt})
+      });
+      const data = await res.json();
+      responseEl.textContent = data.answer || data.error || 'No response';
+    });
+
+    uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      uploadStatusEl.textContent = 'Uploading...';
+      const fileInput = document.getElementById('upload-file');
+      const kbInput = document.getElementById('upload-kb');
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      if (kbInput.value.trim()) {
+        formData.append('knowledge_base_slug', kbInput.value.trim());
+      }
+
+      const res = await fetch('/api/v1/upload-file/', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        uploadStatusEl.textContent = `Indexed successfully. Job: ${data.job_id}, Chunks: ${data.chunk_count}`;
+      } else {
+        uploadStatusEl.textContent = data.error || 'Upload failed';
+      }
+    });
+  </script>
+</body>
+</html>

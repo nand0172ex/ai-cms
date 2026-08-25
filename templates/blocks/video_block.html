@@ -1,0 +1,31 @@
+{% load wagtailcore_tags %}
+
+<div class="video-block">
+    {% if "youtube.com" in value.video_url or "youtu.be" in value.video_url %}
+        {% if "youtu.be" in value.video_url %}
+            {% comment %}Extract video ID from youtu.be URL{% endcomment %}
+            <iframe width="100%" height="400" 
+                    src="https://www.youtube.com/embed/{{ value.video_url|slice:'-11:' }}" 
+                    frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen></iframe>
+        {% else %}
+            <iframe width="100%" height="400" 
+                    src="https://www.youtube.com/embed/{% querystring value.video_url 'v' %}" 
+                    frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen></iframe>
+        {% endif %}
+    {% elif "vimeo.com" in value.video_url %}
+        <iframe width="100%" height="400" 
+                src="https://player.vimeo.com/video/{% regex value.video_url '\d+$' %}" 
+                frameborder="0" allow="autoplay; encrypted-media" 
+                allowfullscreen></iframe>
+    {% else %}
+        <video width="100%" height="400" controls>
+            <source src="{{ value.video_url }}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+    {% endif %}
+    {% if value.caption %}
+        <p class="video-caption">{{ value.caption }}</p>
+    {% endif %}
+</div>

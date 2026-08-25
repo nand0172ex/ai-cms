@@ -1,0 +1,15 @@
+# Production requirements (extends base)
+-r base.txt
+
+# WSGI server
+gunicorn==21.2.0
+
+# Security
+django-cors-headers==4.3.1
+django-ratelimit==4.1.0
+
+# Monitoring (optional, adjust to your preference)
+django-health-check==3.18.1
+
+# Production database pooling
+psycopg2-binary==2.9.9

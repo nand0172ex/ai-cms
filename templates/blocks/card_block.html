@@ -1,0 +1,19 @@
+{% load wagtailimages_tags wagtailcore_tags %}
+
+<div class="card">
+    {% if value.image %}
+        {% image value.image width-300 as card_img %}
+        <div class="card-image">
+            <img src="{{ card_img.url }}" alt="">
+        </div>
+    {% endif %}
+    <div class="card-body">
+        <h5 class="card-title">{{ value.title }}</h5>
+        {% if value.text %}
+            <p class="card-text">{{ value.text }}</p>
+        {% endif %}
+        {% if value.link_text and value.link_url %}
+            <a href="{{ value.link_url }}" class="card-link">{{ value.link_text }}</a>
+        {% endif %}
+    </div>
+</div>
