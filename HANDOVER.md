@@ -255,6 +255,10 @@ Similarly, `AIProviderSettings` (Wagtail setting in `apps.ai_providers`) stores 
 11. **The dashboard HTML/CSS/JS is a single large Python string** inside `apps/knowledge/models.py` (`enterprise_dashboard_display`, roughly 1300+ lines of the file). This is functional but hard to maintain — any future UI change requires care with Python string escaping (a real bug was hit and fixed earlier: JS `"\n"` inside the Python triple-quoted string was being interpreted as a literal newline by Python itself, breaking the JS; the fix was to use `"\\n"` in the Python source so the JS receives a literal `\n`). **Any future edit to this block must double-escape backslashes intended for JavaScript.**
 12. **`.gitignore` was modified externally** just before this handover was written (noted by the environment as changed by "the user or possibly by a formatter"). Content of that change was not inspected as part of this handover — worth checking with `git log -p -- .gitignore` if it matters for next steps.
 
+13. **Processing Status is now dynamic and RBAC-scoped.** The Qdrant Dashboard Embedding Monitor no longer reports `active` merely because a knowledge base is enabled. It reports `queued`, `processing`, `complete`, `failed`, `qdrant_unavailable`, or `collection_missing` from the ingestion job and the live configured Qdrant host/collection. Users without accessible ingestion records see an empty state. Non-superusers see only jobs created by themselves; access to the status endpoints also requires the `knowledge.view_knowledgebase` permission.
+14. **Upload status now reports separate health dimensions.** `/api/v1/vector-db/uploads/status/` includes the configured Qdrant status, latency/error, per-job Qdrant status, collection status, and a status detail while preserving the local ingestion status.
+15. **Wagtail branding is customized.** The admin sidebar uses `config/templates/wagtailadmin/base.html`, the logo is served from `config/static/images/bodhkosh-logo.png`, and the Wagtail admin title/favicon are branded as Bodhkosh.
+
 ---
 
 ## 10. Pending Tasks (not started / explicitly deferred)
@@ -266,6 +270,7 @@ Similarly, `AIProviderSettings` (Wagtail setting in `apps.ai_providers`) stores 
 - Update `templates/conversations/chat_page.html` if the embedding profile / new upload UX should also apply there.
 - Investigate and resolve the gRPC (port 6334) connectivity issue at the Qdrant deployment/network level if gRPC mode is ever required.
 - Review `.gitignore` recent external change to confirm nothing important is now excluded from version control.
+- If the dashboard reports an error in `vector_db_embedding_monitor`, verify there is only one `embedding_monitor(self, user=None)` method in `apps/knowledge/services/dashboard_service.py`; a stale duplicate previously overrode the RBAC-aware method and caused an unexpected `user` keyword error.
 
 ---
 

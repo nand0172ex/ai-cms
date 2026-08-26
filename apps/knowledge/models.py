@@ -357,7 +357,15 @@ class EmbeddingProfile(AbstractBaseModel):
     # Providers whose availability check requires an API key to be meaningful.
     _KEY_REQUIRED_TYPES = {"openai", "azure_openai", "huggingface", "custom"}
 
-    def get_api_key(self):
+    def get_api_key(self, user=None):
+        if self.provider_type != self.ProviderType.DEFAULT:
+            if user is not None and getattr(user, "is_authenticated", False):
+                from apps.accounts.models import UserEmbeddingCredential
+
+                credential = UserEmbeddingCredential.objects.filter(
+                    user=user, embedding_profile=self, is_active=True
+                ).first()
+                return credential.get_api_key() if credential else ""
         if self.api_key:
             return self.api_key
         if not self.api_key_env_var:
@@ -374,7 +382,16 @@ class EmbeddingProfile(AbstractBaseModel):
             return False
         return True
 
-    def test_connection(self, base_url=None, api_key=None, proxy_url=None, timeout_seconds=None):
+    def is_configured_for_user(self, user):
+        if self.provider_type == self.ProviderType.DEFAULT:
+            return True
+        if not self.base_url:
+            return False
+        if self.provider_type in self._KEY_REQUIRED_TYPES and not self.get_api_key(user=user):
+            return False
+        return True
+
+    def test_connection(self, base_url=None, api_key=None, proxy_url=None, timeout_seconds=None, user=None):
         """Check whether this provider's endpoint is reachable.
 
         Accepts optional overrides so the configuration form can test values
@@ -402,27 +419,25 @@ class EmbeddingProfile(AbstractBaseModel):
             trace("No base URL configured - nothing to test.")
             return {"available": False, "detail": "No endpoint configured yet.", "latency_ms": 0, "log": log}
 
-        target_key = api_key if api_key else self.get_api_key()
+        target_key = api_key if api_key else self.get_api_key(user=user)
         target_proxy = proxy_url if proxy_url is not None else self.proxy_url
         target_timeout = timeout_seconds or self.connection_timeout_seconds or 10
 
         headers = {"Authorization": f"Bearer {target_key}"} if target_key else {}
         headers["Content-Type"] = "application/json"
-        request_body = {}
         client_kwargs = {"timeout": target_timeout, "trust_env": False}
         if target_proxy:
             client_kwargs["proxy"] = target_proxy
 
-        trace(f"POST {target_url}")
+        trace(f"GET {target_url}")
         trace(f"Proxy: {target_proxy or 'none'}")
         trace(f"Authorization header: {'Bearer ****' + target_key[-4:] if target_key else 'not sent (no API key)'}")
         trace(f"Timeout: {target_timeout}s")
-        trace(f"Body: {request_body}")
 
         started = time.perf_counter()
         try:
             with httpx.Client(**client_kwargs) as client:
-                response = client.post(target_url, headers=headers, json=request_body)
+                response = client.get(target_url, headers=headers)
             latency_ms = int((time.perf_counter() - started) * 1000)
             trace(f"Response received in {latency_ms}ms")
             trace(f"Status: {response.status_code} {response.reason_phrase}")
@@ -1416,12 +1431,25 @@ const jobsEl = document.getElementById("vdbx-upload-jobs");
 try {
     const data = await api("/api/v1/vector-db/uploads/status/");
     const rows = data.results || [];
+    const qdrant = data.qdrant || {};
+    const qdrantClass = qdrant.status === "connected" ? "vdbx-green" : "vdbx-red";
+    const qdrantLabel = qdrant.status === "connected" ? "Qdrant connected" : "Qdrant unavailable";
+    const qdrantDetail = qdrant.status === "connected"
+        ? "Live connection to " + (qdrant.url || "configured host") + (qdrant.latency_ms ? " (" + qdrant.latency_ms + "ms)" : "")
+        : (qdrant.error || "The configured Qdrant host could not be reached.");
+    const header = '<div style="display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">' +
+        '<span class="vdbx-badge ' + qdrantClass + '">' + qdrantLabel + '</span>' +
+        '<span class="vdbx-tip">' + qdrantDetail + '</span></div>';
     if (!rows.length) {
-        jobsEl.innerHTML = '<span class="vdbx-tip">No upload jobs found.</span>';
+        jobsEl.innerHTML = header + '<span class="vdbx-tip">No upload jobs found.</span>';
         return;
     }
-    jobsEl.innerHTML = '<table class="vdbx-table"><thead><tr><th>Document</th><th>KB</th><th>Status</th><th>Chunks</th><th>Started</th></tr></thead><tbody>' +
-        rows.map((r) => '<tr><td>' + (r.document || '-') + '</td><td>' + (r.knowledge_base || '-') + '</td><td><span class="vdbx-badge ' + badgeClass(r.status) + '">' + (r.status || '-') + '</span></td><td>' + (r.chunk_count || 0) + '</td><td>' + (r.started_at || '-') + '</td></tr>').join('') +
+    jobsEl.innerHTML = header + '<table class="vdbx-table"><thead><tr><th>Document</th><th>Ingestion</th><th>Qdrant</th><th>Collection</th><th>Chunks</th><th>Details</th></tr></thead><tbody>' +
+        rows.map((r) => '<tr><td>' + (r.document || '-') + '<br><span class="vdbx-tip">' + (r.knowledge_base || '-') + '</span></td>' +
+            '<td><span class="vdbx-badge ' + badgeClass(r.status) + '">' + (r.status || '-') + '</span></td>' +
+            '<td><span class="vdbx-badge ' + (r.qdrant_status === "connected" ? "vdbx-green" : "vdbx-red") + '">' + (r.qdrant_status || "unknown") + '</span></td>' +
+            '<td><span class="vdbx-badge ' + (r.collection_status === "available" ? "vdbx-green" : r.collection_status === "missing" ? "vdbx-amber" : "vdbx-red") + '">' + (r.collection_status || "unknown") + '</span></td>' +
+            '<td>' + (r.chunk_count || 0) + '</td><td class="vdbx-tip">' + (r.status_detail || r.error_message || '-') + '</td></tr>').join('') +
         '</tbody></table>';
 } catch (err) {
     jobsEl.innerHTML = '<span class="vdbx-badge vdbx-red">Error</span> ' + err.message;
@@ -1535,11 +1563,15 @@ try {
     const data = await api("/api/v1/vector-db/embeddings/monitor/");
     const rows = data.results || [];
     if (!rows.length) {
-        el.innerHTML = '<span class="vdbx-tip">No embedding metrics yet.</span>';
+        el.innerHTML = '<span class="vdbx-tip">No document ingestion records are available for your account.</span>';
         return;
     }
-    el.innerHTML = '<table class="vdbx-table"><thead><tr><th>KB</th><th>Model</th><th>Chunk Count</th><th>Dimension</th><th>Status</th><th>Success</th><th>Failed</th></tr></thead><tbody>' +
-        rows.map((r) => '<tr><td>' + r.knowledge_base + '</td><td>' + r.embedding_model + '</td><td>' + r.chunk_count + '</td><td>' + r.embedding_dimension + '</td><td><span class="vdbx-badge ' + badgeClass(r.processing_status) + '">' + r.processing_status + '</span></td><td>' + r.success_count + '</td><td>' + r.failed_count + '</td></tr>').join('') +
+    el.innerHTML = '<table class="vdbx-table"><thead><tr><th>KB</th><th>Ingestion</th><th>Qdrant</th><th>Collection</th><th>Local Chunks</th><th>Qdrant Points</th><th>Details</th></tr></thead><tbody>' +
+        rows.map((r) => '<tr><td>' + r.knowledge_base + '</td>' +
+            '<td><span class="vdbx-badge ' + badgeClass(r.processing_status) + '">' + r.processing_status + '</span></td>' +
+            '<td><span class="vdbx-badge ' + (r.qdrant_status === "connected" ? "vdbx-green" : "vdbx-red") + '">' + r.qdrant_status + '</span></td>' +
+            '<td><span class="vdbx-badge ' + (r.collection_status === "available" ? "vdbx-green" : r.collection_status === "missing" ? "vdbx-amber" : "vdbx-red") + '">' + r.collection_status + '</span></td>' +
+            '<td>' + (r.chunk_count || 0) + '</td><td>' + (r.qdrant_points || 0) + '</td><td class="vdbx-tip">' + (r.status_detail || '-') + '</td></tr>').join('') +
         '</tbody></table>';
 } catch (err) {
     el.innerHTML = '<span class="vdbx-badge vdbx-red">Error</span> ' + err.message;
@@ -1704,7 +1736,7 @@ providerConnSlug = slug;
 document.getElementById("vdbx-provider-conn-title").textContent = "Configure " + profile.name;
 document.getElementById("vdbx-provider-conn-url").value = profile.base_url || "";
 document.getElementById("vdbx-provider-conn-key").value = "";
-document.getElementById("vdbx-provider-conn-key").placeholder = profile.api_key_set ? "Key is set - leave blank to keep it" : "No key set yet";
+document.getElementById("vdbx-provider-conn-key").placeholder = profile.api_key_masked ? profile.api_key_masked + " - leave blank to keep it" : "No key set yet";
 document.getElementById("vdbx-provider-conn-proxy").value = profile.proxy_url || "";
 document.getElementById("vdbx-provider-conn-timeout").value = profile.connection_timeout_seconds || 10;
 document.getElementById("vdbx-provider-conn-status").textContent = "Not tested yet.";
@@ -1732,11 +1764,20 @@ try {
         connection_timeout_seconds: Number(document.getElementById("vdbx-provider-conn-timeout").value || "10"),
         save: !!save,
     };
-    const data = await api("/api/v1/embedding-profiles/" + providerConnSlug + "/connection/", {
+    const request = save ? {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify(body),
-    });
+    } : {
+        method: "GET",
+        headers: {
+            "X-Embedding-Base-Url": body.base_url,
+            "X-Embedding-Api-Key": body.api_key,
+            "X-Embedding-Proxy-Url": body.proxy_url,
+            "X-Embedding-Timeout": String(body.connection_timeout_seconds),
+        },
+    };
+    const data = await api("/api/v1/embedding-profiles/" + providerConnSlug + "/connection/", request);
     statusEl.innerHTML = '<span class="vdbx-badge ' + (data.available ? "vdbx-green" : "vdbx-red") + '">' + (data.available ? "Available" : "Unavailable") + '</span> ' +
         '<span class="vdbx-tip">' + (data.detail || "") + (data.latency_ms ? " (" + data.latency_ms + "ms)" : "") + '</span>';
     document.getElementById("vdbx-provider-conn-console").textContent = (data.log && data.log.length) ? data.log.join("\\n") : "No diagnostic output returned.";

@@ -6,6 +6,7 @@ from django.http import StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.accounts.models import UserEmbeddingCredential
 from apps.audit.models import AuditEvent
 from apps.ai_providers.models import AIProviderSettings, ProviderType
 from apps.conversations.models import AssistantRuntimeSettings
@@ -311,6 +312,15 @@ def upload_file(request):
 	job = IngestionJob.objects.create(
 		document=document,
 		created_by=request.user if request.user.is_authenticated else None,
+		embedding_credential=(
+			UserEmbeddingCredential.objects.filter(
+				user=request.user, embedding_profile=embedding_profile, is_active=True
+			).first()
+			if request.user.is_authenticated
+			and embedding_profile
+			and embedding_profile.provider_type != EmbeddingProfile.ProviderType.DEFAULT
+			else None
+		),
 	)
 
 	run_async = (request.POST.get("async") or "false").lower() in {"1", "true", "yes"}

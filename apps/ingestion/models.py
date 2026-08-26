@@ -62,6 +62,13 @@ class IngestionJob(AbstractBaseModel):
     error_message = models.TextField(blank=True)
     chunk_count = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    embedding_credential = models.ForeignKey(
+        "accounts.UserEmbeddingCredential",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ingestion_jobs",
+    )
 
 
 class IngestedChunk(AbstractBaseModel):

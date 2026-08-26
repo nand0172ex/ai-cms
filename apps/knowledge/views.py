@@ -6,12 +6,17 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_http_methods
 
+from apps.accounts.models import UserEmbeddingCredential
 from apps.connectors.models import ConnectorConfig
 from apps.knowledge.models import EmbeddingProfile
 from apps.knowledge.models import KnowledgeBase
 from apps.knowledge.models import VectorDBSettings
 from apps.knowledge.services import CollectionManagementService
 from apps.knowledge.services import VectorDBDashboardService
+
+
+def _can_view_vector_status(request):
+	return request.user.is_superuser or request.user.has_perm("knowledge.view_knowledgebase")
 
 
 def _parse_json(request: HttpRequest):
@@ -147,9 +152,11 @@ def vector_db_collection_detail(request, slug):
 @login_required
 @require_GET
 def vector_db_upload_status(request):
+	if not _can_view_vector_status(request):
+		return JsonResponse({"error": "You do not have permission to view vector processing status."}, status=403)
 	settings = VectorDBSettings.for_request(request)
 	service = VectorDBDashboardService(settings)
-	return JsonResponse({"results": service.uploads_status()})
+	return JsonResponse(service.uploads_status(user=request.user))
 
 
 @login_required
@@ -181,9 +188,11 @@ def vector_db_manual_resync(request, connector_id):
 @login_required
 @require_GET
 def vector_db_embedding_monitor(request):
+	if not _can_view_vector_status(request):
+		return JsonResponse({"error": "You do not have permission to view embedding status."}, status=403)
 	settings = VectorDBSettings.for_request(request)
 	service = VectorDBDashboardService(settings)
-	return JsonResponse({"results": service.embedding_monitor()})
+	return JsonResponse({"results": service.embedding_monitor(user=request.user)})
 
 
 @login_required
@@ -236,6 +245,7 @@ def vector_db_system_monitoring(request):
 	return JsonResponse({"monitoring": service.system_monitoring()})
 
 
+@login_required
 @require_GET
 def embedding_profiles(request):
 	"""List configurable embedding provider profiles for the upload UI.
@@ -247,16 +257,27 @@ def embedding_profiles(request):
 
 	profiles = EmbeddingProfile.objects.filter(is_active=True).order_by("sort_order", "name")
 	default_profile = profiles.filter(is_default=True).first()
+	results = []
+	for profile in profiles:
+		card = profile.to_card_dict()
+		if profile.provider_type != EmbeddingProfile.ProviderType.DEFAULT:
+			credential = UserEmbeddingCredential.objects.filter(
+				user=request.user, embedding_profile=profile, is_active=True
+			).first()
+			card["api_key_set"] = bool(credential and credential.encrypted_api_key)
+			card["api_key_masked"] = credential.masked_api_key if credential else ""
+			card["is_configured"] = profile.is_configured_for_user(request.user)
+		results.append(card)
 	return JsonResponse(
 		{
-			"results": [profile.to_card_dict() for profile in profiles],
+			"results": results,
 			"default_slug": default_profile.slug if default_profile else "",
 		}
 	)
 
 
 @login_required
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def embedding_profile_connection(request, slug):
 	"""Test or save the connection settings for a single embedding provider.
 
@@ -265,9 +286,22 @@ def embedding_profile_connection(request, slug):
 	"""
 
 	profile = get_object_or_404(EmbeddingProfile, slug=slug)
-	body = _parse_json(request)
+	body = _parse_json(request) if request.method == "POST" else {}
 	if body is None:
 		return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+	if request.method == "GET":
+		body = {
+			"base_url": request.headers.get("X-Embedding-Base-Url"),
+			"api_key": request.headers.get("X-Embedding-Api-Key"),
+			"proxy_url": request.headers.get("X-Embedding-Proxy-Url"),
+			"connection_timeout_seconds": request.headers.get("X-Embedding-Timeout"),
+		}
+	if profile.provider_type != EmbeddingProfile.ProviderType.DEFAULT:
+		credential = UserEmbeddingCredential.objects.filter(
+			user=request.user, embedding_profile=profile, is_active=True
+		).first()
+	else:
+		credential = None
 
 	base_url = body.get("base_url")
 	api_key = (body.get("api_key") or "").strip() or None
@@ -280,15 +314,24 @@ def embedding_profile_connection(request, slug):
 
 	result = profile.test_connection(
 		base_url=base_url,
-		api_key=api_key,
+		api_key=api_key or (credential.get_api_key() if credential else None),
 		proxy_url=proxy_url,
 		timeout_seconds=timeout_seconds,
+		user=request.user,
 	)
 
-	if body.get("save"):
+	if request.method == "POST" and body.get("save"):
 		if base_url is not None:
 			profile.base_url = (base_url or "").strip()
-		if api_key:
+		if profile.provider_type != EmbeddingProfile.ProviderType.DEFAULT and api_key:
+			credential, _ = UserEmbeddingCredential.objects.get_or_create(
+				user=request.user, embedding_profile=profile,
+				defaults={"is_active": True},
+			)
+			credential.set_api_key(api_key)
+			credential.is_active = True
+			credential.save(update_fields=["encrypted_api_key", "is_active", "updated_at"])
+		elif api_key:
 			profile.api_key = api_key
 		if proxy_url is not None:
 			profile.proxy_url = (proxy_url or "").strip()
@@ -300,6 +343,12 @@ def embedding_profile_connection(request, slug):
 		result["saved"] = False
 
 	result["profile"] = profile.to_card_dict()
+	if profile.provider_type != EmbeddingProfile.ProviderType.DEFAULT:
+		credential = UserEmbeddingCredential.objects.filter(
+			user=request.user, embedding_profile=profile, is_active=True
+		).first()
+		result["profile"]["api_key_set"] = bool(credential and credential.encrypted_api_key)
+		result["profile"]["api_key_masked"] = credential.masked_api_key if credential else ""
 	return JsonResponse(result)
 
 

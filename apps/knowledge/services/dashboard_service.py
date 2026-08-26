@@ -120,29 +120,79 @@ class VectorDBDashboardService:
     def collections_summary(self):
         result = []
         by_effective = {kb.effective_collection_name: kb for kb in KnowledgeBase.objects.select_related("tenant")}
-        for item in self._safe_list_collections():
-            name = item["name"]
-            stats = item["stats"]
-            kb = by_effective.get(name)
-            health = "green"
-            if stats.get("status") not in {"green", "ok", "Healthy", "healthy"}:
-                health = "amber"
-            if (stats.get("points_count", 0) or 0) == 0:
-                health = "amber"
+    def embedding_monitor(self, user=None):
+        jobs = IngestionJob.objects.select_related(
+            "document", "document__data_source", "document__data_source__knowledge_base"
+        )
+        if user is not None and not getattr(user, "is_superuser", False):
+            jobs = jobs.filter(created_by=user)
+        jobs = list(jobs.order_by("-created_at"))
+        if not jobs:
+            return []
 
-            result.append(
+        connection = self.connection_status()
+        rows = []
+        seen_kbs = set()
+        for job in jobs:
+            kb = job.document.data_source.knowledge_base
+            if kb.pk in seen_kbs:
+                continue
+            seen_kbs.add(kb.pk)
+            collection_exists = None
+            collection_points = 0
+            if connection["connected"]:
+                try:
+                    collection_exists = self.repository.collection_exists(kb.effective_collection_name)
+                    if collection_exists:
+                        collection_points = self.repository.get_collection_stats(
+                            kb.effective_collection_name
+                        ).get("points_count", 0) or 0
+                except Exception:
+                    collection_exists = False
+
+            if not connection["connected"]:
+                processing_status = "qdrant_unavailable"
+                status_detail = connection["error"] or "Configured Qdrant host is unavailable."
+            elif not collection_exists:
+                processing_status = "collection_missing"
+                status_detail = "No matching collection exists on the configured Qdrant host."
+            elif job.status == IngestionJob.Status.PENDING:
+                processing_status = "queued"
+                status_detail = "Document is queued for ingestion."
+            elif job.status == IngestionJob.Status.RUNNING:
+                processing_status = "processing"
+                status_detail = "Document ingestion is currently running."
+            elif job.status == IngestionJob.Status.FAILED:
+                processing_status = "failed"
+                status_detail = job.error_message or "Document ingestion failed."
+            else:
+                processing_status = "complete"
+                status_detail = "Document ingestion is complete."
+
+            rows.append(
                 {
-                    "collection": name,
-                    "knowledge_base_slug": kb.slug if kb else None,
-                    "knowledge_base_name": kb.name if kb else None,
-                    "points_count": stats.get("points_count", 0),
-                    "vectors_count": stats.get("vectors_count", 0),
-                    "vector_size": stats.get("vector_size"),
-                    "status": stats.get("status"),
-                    "health": health,
+                    "knowledge_base": kb.slug,
+                    "embedding_model": "deterministic-default",
+                    "chunk_count": job.chunk_count,
+                    "qdrant_points": collection_points,
+                    "embedding_dimension": kb.vector_size,
+                    "processing_status": processing_status,
+                    "status_detail": status_detail,
+                    "qdrant_status": "connected" if connection["connected"] else "unavailable",
+                    "collection_status": "available" if collection_exists else "missing" if collection_exists is False else "unknown",
+                    "success_count": sum(
+                        item.status == IngestionJob.Status.SUCCESS
+                        and item.document.data_source.knowledge_base_id == kb.pk
+                        for item in jobs
+                    ),
+                    "failed_count": sum(
+                        item.status == IngestionJob.Status.FAILED
+                        and item.document.data_source.knowledge_base_id == kb.pk
+                        for item in jobs
+                    ),
                 }
             )
-        return result
+        return rows
 
     def create_collection_for_kb(self, kb):
         service = CollectionManagementService(kb)
@@ -155,24 +205,60 @@ class VectorDBDashboardService:
         deleted = service.repository.delete_collection(kb.effective_collection_name)
         return {"deleted": deleted, "collection": kb.effective_collection_name}
 
-    def uploads_status(self, limit=50):
-        jobs = (
-            IngestionJob.objects.select_related("document", "document__data_source", "document__data_source__knowledge_base")
-            .order_by("-created_at")[:limit]
+    def uploads_status(self, limit=50, user=None):
+        connection = self.connection_status()
+        jobs_query = IngestionJob.objects.select_related(
+            "document", "document__data_source", "document__data_source__knowledge_base"
         )
-        return [
-            {
-                "job_id": job.id,
-                "document": job.document.title,
-                "knowledge_base": job.document.data_source.knowledge_base.slug,
-                "status": job.status,
-                "chunk_count": job.chunk_count,
-                "started_at": job.started_at.isoformat() if job.started_at else None,
-                "finished_at": job.finished_at.isoformat() if job.finished_at else None,
-                "error_message": job.error_message,
-            }
-            for job in jobs
-        ]
+        if user is not None and not getattr(user, "is_superuser", False):
+            jobs_query = jobs_query.filter(created_by=user)
+        jobs = jobs_query.order_by("-created_at")[:limit]
+        rows = []
+        for job in jobs:
+            kb = job.document.data_source.knowledge_base
+            collection_exists = None
+            if connection["connected"]:
+                try:
+                    collection_exists = self.repository.collection_exists(kb.effective_collection_name)
+                except Exception:
+                    collection_exists = False
+
+            if not connection["connected"]:
+                status_detail = "Qdrant unavailable; ingestion status is from the local job record."
+            elif collection_exists is False:
+                status_detail = "Collection is missing on the configured Qdrant host."
+            elif job.status == IngestionJob.Status.SUCCESS:
+                status_detail = "Ingestion completed and the collection is available."
+            else:
+                status_detail = f"Local ingestion job is {job.status}."
+
+            rows.append(
+                {
+                    "job_id": job.id,
+                    "document": job.document.title,
+                    "knowledge_base": kb.slug,
+                    "collection": kb.effective_collection_name,
+                    "status": job.status,
+                    "chunk_count": job.chunk_count,
+                    "started_at": job.started_at.isoformat() if job.started_at else None,
+                    "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+                    "error_message": job.error_message,
+                    "qdrant_status": "connected" if connection["connected"] else "unavailable",
+                    "collection_status": (
+                        "available" if collection_exists else "missing" if collection_exists is False else "unknown"
+                    ),
+                    "status_detail": status_detail,
+                }
+            )
+        return {
+            "qdrant": {
+                "status": "connected" if connection["connected"] else "unavailable",
+                "url": self.settings.qdrant_url or "http://localhost:6333",
+                "latency_ms": connection["latency_ms"],
+                "error": connection["error"],
+            },
+            "results": rows,
+        }
 
     def sync_status(self, limit=50):
         runs = ConnectorSyncRun.objects.select_related("connector").order_by("-created_at")[:limit]
@@ -219,28 +305,6 @@ class VectorDBDashboardService:
             "fetched_count": run.fetched_count,
             "indexed_count": run.indexed_count,
         }
-
-    def embedding_monitor(self):
-        chunk_counts = IngestedChunk.objects.values("knowledge_base__slug").annotate(total=Count("id"))
-        chunks_by_kb = {item["knowledge_base__slug"]: item["total"] for item in chunk_counts}
-
-        success_count = IngestionJob.objects.filter(status=IngestionJob.Status.SUCCESS).count()
-        failed_count = IngestionJob.objects.filter(status=IngestionJob.Status.FAILED).count()
-
-        rows = []
-        for kb in KnowledgeBase.objects.order_by("name"):
-            rows.append(
-                {
-                    "knowledge_base": kb.slug,
-                    "embedding_model": "deterministic-default",
-                    "chunk_count": chunks_by_kb.get(kb.slug, 0),
-                    "embedding_dimension": kb.vector_size,
-                    "processing_status": "active" if kb.is_active else "inactive",
-                    "success_count": success_count,
-                    "failed_count": failed_count,
-                }
-            )
-        return rows
 
     def search_playground(self, kb, query, top_k=5, score_threshold=None):
         try:
