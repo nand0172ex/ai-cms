@@ -1,3 +1,5 @@
+{% load wagtailsettings_tags %}
+{% get_settings %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -123,32 +125,6 @@
       text-transform: uppercase;
     }
 
-    .mode-toggle {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border: 1px solid #ebc6c6;
-      background: #fff7f7;
-      border-radius: 999px;
-      padding: 5px 8px;
-    }
-
-    .mode-toggle span {
-      font-size: 11px;
-      color: #7a2f2f;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-
-    .mode-toggle label {
-      font-size: 12px;
-      color: #5b3040;
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      cursor: pointer;
-      user-select: none;
-    }
 
     .content {
       padding: 16px;
@@ -194,6 +170,23 @@
       min-width: 104px;
       cursor: pointer;
       text-transform: uppercase;
+    }
+
+    .cancel-btn {
+      border: 1px solid #c8d2e3;
+      background: #ffffff;
+      color: #314560;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 96px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+
+    .cancel-btn[hidden] {
+      display: none !important;
     }
 
     .analyse-btn:disabled {
@@ -365,11 +358,33 @@
       color: #36507b;
     }
 
+    .flow-panel {
+      margin-top: 8px;
+      border: 1px solid #d6deec;
+      border-radius: 8px;
+      background: #f9fbff;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #2f466f;
+      white-space: pre-wrap;
+      display: none;
+    }
+
     .loading {
       padding: 12px;
       text-align: center;
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .site-footer {
+      margin: 10px auto 18px;
+      max-width: 1140px;
+      padding: 12px 16px;
+      text-align: center;
+      color: #5f6b7a;
+      font-size: 12px;
+      border-top: 1px solid #d9e1ee;
     }
 
     @media (max-width: 880px) {
@@ -379,7 +394,6 @@
       .rca-grid { grid-template-columns: 1fr; }
       .search-row { grid-template-columns: 1fr; }
       .analyse-btn { width: 100%; }
-      .mode-toggle { border-radius: 10px; }
     }
   </style>
 </head>
@@ -401,18 +415,16 @@
     <section class="card">
       <div class="card-head">
         <h2>Issue / Error / Incident Search</h2>
-        <div class="mode-toggle">
-          <span>Mode</span>
-          <label><input type="radio" name="demo-mode" value="on" checked> Demo ON</label>
-          <label><input type="radio" name="demo-mode" value="off"> Demo OFF</label>
-        </div>
       </div>
       <div class="content">
         <p class="hint">Type error, issue statement, incident ID, defect ID, log symptom or business impact</p>
 
         <div class="search-row">
           <textarea id="promptInput" placeholder="Kafka replayed migration data after MSK upgrade. Customer records overwritten. Billing and ordering impacted."></textarea>
-          <button class="analyse-btn" id="analyseBtn">ANALYSE</button>
+          <div style="display:flex; gap:8px; align-items:flex-start;">
+            <button class="analyse-btn" id="analyseBtn">ANALYSE</button>
+            <button class="cancel-btn" id="cancelBtn" type="button" hidden>CANCEL</button>
+          </div>
         </div>
 
         <div class="chips" id="chips"></div>
@@ -470,10 +482,19 @@
         </div>
 
         <div class="status" id="statusBar">Ready. Start typing to get smart incident matches.</div>
+        <div class="flow-panel" id="flowPanel"></div>
       </div>
       <div class="content muted" style="border-top: 1px solid var(--border);">No browser storage APIs are used. This page is safe for local browser demo and sandboxed preview.</div>
     </section>
   </main>
+
+  <footer class="site-footer">
+    {% if settings.branding.BrandingSettings.copyright_text %}
+      {{ settings.branding.BrandingSettings.copyright_text }}
+    {% else %}
+      &copy; {% now "Y" %} {{ settings.branding.BrandingSettings.site_name|default:"Bodhkosh" }}. All rights reserved.
+    {% endif %}
+  </footer>
 
   <script>
     const INCIDENTS = [
@@ -549,6 +570,7 @@
 
     const promptInput = document.getElementById("promptInput");
     const analyseBtn = document.getElementById("analyseBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
     const clearPageBtn = document.getElementById("clearPageBtn");
     const chipsWrap = document.getElementById("chips");
     const suggestionsRows = document.getElementById("suggestionsRows");
@@ -561,13 +583,49 @@
     const rcaGrid = document.getElementById("rcaGrid");
     const aiAnswer = document.getElementById("aiAnswer");
     const statusBar = document.getElementById("statusBar");
-    const demoModeRadios = document.querySelectorAll('input[name="demo-mode"]');
-
+    const flowPanel = document.getElementById("flowPanel");
     let conversationId = null;
+    let flowStartTs = 0;
+    let flowTimer = null;
+    let activeController = null;
 
-    function isDemoModeOn() {
-      const checked = document.querySelector('input[name="demo-mode"]:checked');
-      return !checked || checked.value === "on";
+    function resetFlow() {
+      flowStartTs = 0;
+      if (flowTimer) {
+        window.clearInterval(flowTimer);
+        flowTimer = null;
+      }
+      if (flowPanel) {
+        flowPanel.style.display = "none";
+        flowPanel.textContent = "";
+      }
+    }
+
+    function flow(message) {
+      if (!flowPanel) return;
+      if (!flowStartTs) {
+        flowStartTs = Date.now();
+        flowPanel.style.display = "block";
+      }
+      const elapsed = ((Date.now() - flowStartTs) / 1000).toFixed(1);
+      flowPanel.textContent += `[${elapsed}s] ${message}\n`;
+    }
+
+    function startWaitPulse() {
+      if (flowTimer) window.clearInterval(flowTimer);
+      flowTimer = window.setInterval(function(){
+        const elapsed = ((Date.now() - flowStartTs) / 1000).toFixed(1);
+        if (flowPanel) {
+          flowPanel.textContent += `[${elapsed}s] Waiting for model response...\n`;
+        }
+      }, 7000);
+    }
+
+    function stopWaitPulse() {
+      if (flowTimer) {
+        window.clearInterval(flowTimer);
+        flowTimer = null;
+      }
     }
 
     function tokenize(text) {
@@ -605,19 +663,10 @@
     }
 
     function renderSuggestions(query) {
-      if (!isDemoModeOn()) {
-        suggestionsRows.innerHTML = `
-          <div class="incident-row">
-            <div>
-              <strong>LIVE</strong>
-              <span class="meta">Demo OFF: suggestions prioritize real knowledge retrieval after analysis.</span>
-            </div>
-            <span class="score mid">Live</span>
-          </div>
-        `;
+      if (!query || !query.trim()) {
+        suggestionsRows.innerHTML = "";
         return;
       }
-
       const ranked = rankIncidents(query).slice(0, 4);
       suggestionsRows.innerHTML = ranked.map((row) => {
         const scoreView = classifyScore(row.score);
@@ -706,133 +755,143 @@
     }
 
     async function analyzePrompt() {
+      resetFlow();
       const prompt = promptInput.value.trim();
       if (!prompt) {
         alert("Please enter issue details before analysis.");
         return;
       }
+      flow("Input validated.");
 
       const ranked = rankIncidents(prompt);
-      const best = ranked[0];
-
-      if (isDemoModeOn()) {
-        analyseBtn.disabled = true;
-        analyseBtn.textContent = "ANALYZING...";
-        statusBar.textContent = "Demo mode: running local pattern matching...";
-
-        renderSuggestions(prompt);
-        analysisGrid.style.display = "grid";
-
-        // Demo mode is intentionally instant and does not call backend APIs.
-        const demoAnswer =
-          `Most likely historical match: ${best.id} (${classifyScore(best.score).pct}).\n` +
-          `${best.title}\n\n` +
-          `Likely RCA:\n- ${best.rca.join("\n- ")}\n\n` +
-          `Recommended actions:\n- ${best.actions.join("\n- ")}`;
-
-        renderBestMatch(best, demoAnswer);
-        renderSimilarIssues(ranked);
-        renderBulletList(impactList, best.impact);
-        renderBulletList(actionsList, best.actions);
-        renderRca(best);
-        aiAnswer.textContent = demoAnswer;
-
-        statusBar.textContent =
-          "Demo analysis complete instantly. Switch Demo OFF for live assistant and citations.";
-        analyseBtn.disabled = false;
-        analyseBtn.textContent = "ANALYSE";
-        return;
-      }
+      flow(`Local ranking prepared (${ranked.length} candidates).`);
 
       analyseBtn.disabled = true;
       analyseBtn.textContent = "ANALYZING...";
+      if (cancelBtn) cancelBtn.hidden = false;
       statusBar.textContent = "Analyzing prompt, searching incident patterns, and generating RCA guidance...";
+      flow("UI locked and analysis started.");
 
       renderSuggestions(prompt);
+      flow("Suggestions rendered.");
       analysisGrid.style.display = "grid";
       aiAnswer.textContent = "Working on your request...";
 
       let answer = "";
       let apiError = null;
       let citations = [];
+      let cancelledByUser = false;
 
       try {
+        activeController = new AbortController();
+        flow("Sending request to /api/v1/chat/ ...");
+        flow("Server will query available Qdrant collection(s) for retrieval context (read-only).\n");
+        startWaitPulse();
         const response = await fetch("/api/v1/chat/", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: activeController.signal,
           body: JSON.stringify({
             prompt,
-            conversation_id: conversationId
+            conversation_id: conversationId,
+            debug: true
           })
         });
+        stopWaitPulse();
+        flow(`Response received (HTTP ${response.status}).`);
 
         const payload = await response.json();
+        flow("Response JSON parsed.");
         if (!response.ok) {
           apiError = payload.error || "Unable to process prompt";
+          flow(`Backend error: ${apiError}`);
         } else {
           conversationId = payload.conversation_id;
           answer = payload.answer || "No response returned by assistant.";
           citations = payload.citations || [];
+          flow(`Answer received (${answer.length} chars), citations: ${citations.length}.`);
+        }
+        if (payload && payload.debug) {
+          const dbg = payload.debug;
+          const elapsed = typeof dbg.elapsed_ms === "number" ? `${dbg.elapsed_ms}ms` : "n/a";
+          flow(
+            `Debug stage=${dbg.stage || "n/a"}; retrieval=${dbg.retrieval_status || "n/a"}(${dbg.retrieval_count || 0}); llm=${dbg.llm_status || "n/a"}; elapsed=${elapsed}.`
+          );
+          flow(
+            `Debug provider=${dbg.llm_provider_type || "n/a"}; model=${dbg.llm_model || "n/a"}; endpoint=${dbg.llm_endpoint || "n/a"}.`
+          );
+          if (dbg.retrieval) {
+            flow(
+              `Debug collections target=${dbg.retrieval.target_collection || "n/a"}; selected=${dbg.retrieval.selected_collection || "n/a"}; available=${(dbg.retrieval.available_collections || []).join(", ") || "none"}.`
+            );
+          }
+          if (dbg.llm_error) {
+            flow(`Debug llm_error=${dbg.llm_error_type || "Error"}: ${dbg.llm_error}`);
+          }
         }
       } catch (error) {
-        apiError = error.message || "Network error while calling chat API";
+        stopWaitPulse();
+        if (error && error.name === "AbortError") {
+          apiError = "Request cancelled by user.";
+          cancelledByUser = true;
+          flow("User cancelled the active request.");
+        } else {
+          apiError = error.message || "Network error while calling chat API";
+          flow(`Request exception: ${apiError}`);
+        }
+      } finally {
+        activeController = null;
       }
 
-      if (!isDemoModeOn()) {
-        const fallbackBest = {
-          id: "LIVE-RAG",
-          score: 0.91,
-          severity: "Dynamic",
-          owner: "AI Runtime",
-          impact: [
-            "Impact inferred from retrieval context",
-            "Use linked citations to verify affected domains",
-            "Escalate to owning team based on confidence",
-          ],
-          actions: [
-            "Review retrieved citations and validate scope",
-            "Create mitigation runbook from assistant output",
-            "Track follow-up actions in incident workflow",
-          ],
-          rca: [
-            "Derived from current query and retrieval context",
-          ],
-          title: "Live retrieval driven analysis",
-          category: "RAG",
-        };
+      const fallbackBest = {
+        id: "LIVE-RAG",
+        score: 0.91,
+        severity: "Dynamic",
+        owner: "AI Runtime",
+        impact: [
+          "Impact inferred from retrieval context",
+          "Use linked citations to verify affected domains",
+          "Escalate to owning team based on confidence",
+        ],
+        actions: [
+          "Review retrieved citations and validate scope",
+          "Create mitigation runbook from assistant output",
+          "Track follow-up actions in incident workflow",
+        ],
+        rca: [
+          "Derived from current query and retrieval context",
+        ],
+        title: "Live retrieval driven analysis",
+        category: "RAG",
+      };
 
-        const liveAnswer = apiError
-          ? "Assistant API error: " + apiError + "\n\nPlease verify provider and vector DB settings."
-          : answer;
+      const liveAnswer = apiError
+        ? "Assistant API error: " + apiError + "\n\nPlease verify provider and vector DB settings."
+        : answer;
 
-        renderBestMatch(fallbackBest, liveAnswer || "No answer returned.");
-        renderLiveCitations(citations);
-        renderBulletList(impactList, fallbackBest.impact);
-        renderBulletList(actionsList, extractActionsFromAnswer(liveAnswer || "", fallbackBest.actions));
-        renderRca(fallbackBest);
-        aiAnswer.textContent = liveAnswer || "No answer returned.";
-        statusBar.textContent = apiError
-          ? "Live mode completed with API error. Check AI provider connectivity."
-          : "Live mode completed with dynamic assistant output.";
+      if (cancelledByUser) {
+        statusBar.textContent = "Analysis cancelled. You can update prompt and retry.";
+        flow("Cancelled cleanly.");
         analyseBtn.disabled = false;
         analyseBtn.textContent = "ANALYSE";
+        if (cancelBtn) cancelBtn.hidden = true;
         return;
       }
 
-      if (apiError) {
-        answer = "Assistant API error: " + apiError + "\n\nShowing triage from historical incident patterns only.";
-      }
-
-      renderBestMatch(best, answer);
-      renderSimilarIssues(ranked);
-      renderBulletList(impactList, best.impact);
-      renderBulletList(actionsList, extractActionsFromAnswer(answer, best.actions));
-      renderRca(best);
-      aiAnswer.textContent = answer;
-
-      statusBar.textContent = "Analysis complete. Best match " + best.id + " with confidence " + classifyScore(best.score).pct + ".";
+      renderBestMatch(fallbackBest, liveAnswer || "No answer returned.");
+      renderLiveCitations(citations);
+      renderBulletList(impactList, fallbackBest.impact);
+      renderBulletList(actionsList, extractActionsFromAnswer(liveAnswer || "", fallbackBest.actions));
+      renderRca(fallbackBest);
+      aiAnswer.textContent = liveAnswer || "No answer returned.";
+      flow("Rendered output panels.");
+      statusBar.textContent = apiError
+        ? "Live mode completed with API error. Check AI provider connectivity."
+        : "Live mode completed with dynamic assistant output.";
+      flow(apiError ? "Completed with error." : "Completed successfully.");
       analyseBtn.disabled = false;
       analyseBtn.textContent = "ANALYSE";
+      if (cancelBtn) cancelBtn.hidden = true;
     }
 
     function clearDashboard() {
@@ -848,6 +907,12 @@
       aiAnswer.textContent = "";
       statusBar.textContent = "Ready. Start typing to get smart incident matches.";
       conversationId = null;
+      if (activeController) {
+        activeController.abort();
+        activeController = null;
+      }
+      if (cancelBtn) cancelBtn.hidden = true;
+      resetFlow();
       renderSuggestions("");
     }
 
@@ -873,16 +938,18 @@
     });
 
     analyseBtn.addEventListener("click", analyzePrompt);
-    clearPageBtn.addEventListener("click", clearDashboard);
-
-    demoModeRadios.forEach((radio) => {
-      radio.addEventListener("change", () => {
-        clearDashboard();
-        statusBar.textContent = isDemoModeOn()
-          ? "Demo mode ON. Pattern-ranking blocks are enabled."
-          : "Demo mode OFF. Results are driven by live assistant output.";
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        if (!activeController) return;
+        activeController.abort();
+        stopWaitPulse();
+        analyseBtn.disabled = false;
+        analyseBtn.textContent = "ANALYSE";
+        cancelBtn.hidden = true;
+        statusBar.textContent = "Analysis cancelled. You can update prompt and retry.";
       });
-    });
+    }
+    clearPageBtn.addEventListener("click", clearDashboard);
 
     initQuickChips();
     renderSuggestions("");

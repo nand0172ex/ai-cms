@@ -12,5 +12,6 @@ urlpatterns = [
     path("api/v1/assistants/", views.assistants, name="assistants"),
     path("api/v1/knowledge-bases/", views.knowledge_bases, name="knowledge_bases"),
     path("api/v1/jobs/status/", views.job_status, name="job_status"),
+    path("api/v1/runtime-health/", views.runtime_health, name="runtime_health"),
     path("api/v1/errors/summary/", views.error_summary, name="error_summary"),
 ]

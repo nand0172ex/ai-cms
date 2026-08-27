@@ -1,4 +1,4 @@
-{% load static wagtailcore_tags wagtailuserbar %}
+{% load static wagtailcore_tags wagtailuserbar wagtailsettings_tags %}
 
 <!DOCTYPE html>
 <html lang="en">
@@ -32,9 +32,18 @@
     </head>
 
     <body class="{% block body_class %}{% endblock %}">
+        {% get_settings %}
         {% wagtailuserbar %}
 
         {% block content %}{% endblock %}
+
+        <footer class="site-footer" role="contentinfo" style="padding: 18px 20px; text-align: center; color: #5b6472; font-size: 12px; border-top: 1px solid #e5e7eb; margin-top: 24px;">
+            {% if settings.branding.BrandingSettings.copyright_text %}
+                {{ settings.branding.BrandingSettings.copyright_text }}
+            {% else %}
+                &copy; {% now "Y" %} {{ settings.branding.BrandingSettings.site_name|default:"Bodhkosh" }}. All rights reserved.
+            {% endif %}
+        </footer>
 
         {# Global javascript #}
         <script type="text/javascript" src="{% static 'js/config.js' %}"></script>

@@ -41,6 +41,26 @@ urlpatterns = [
         name="vector_db_manual_resync",
     ),
     path(
+        "api/v1/vector-db/connectors/",
+        views.vector_db_connectors,
+        name="vector_db_connectors",
+    ),
+    path(
+        "api/v1/vector-db/connectors/<int:connector_id>/",
+        views.vector_db_connector_detail,
+        name="vector_db_connector_detail",
+    ),
+    path(
+        "api/v1/vector-db/connectors/<int:connector_id>/test/",
+        views.vector_db_connector_test,
+        name="vector_db_connector_test",
+    ),
+    path(
+        "api/v1/vector-db/connectors/<int:connector_id>/sync/",
+        views.vector_db_connector_sync,
+        name="vector_db_connector_sync",
+    ),
+    path(
         "api/v1/vector-db/embeddings/monitor/",
         views.vector_db_embedding_monitor,
         name="vector_db_embedding_monitor",
@@ -69,5 +89,20 @@ urlpatterns = [
         "api/v1/embedding-profiles/<slug:slug>/connection/",
         views.embedding_profile_connection,
         name="embedding_profile_connection",
+    ),
+    path(
+        "api/v1/reasoning-profiles/",
+        views.reasoning_profiles,
+        name="reasoning_profiles",
+    ),
+    path(
+        "api/v1/reasoning-profiles/<slug:slug>/connection/",
+        views.reasoning_profile_connection,
+        name="reasoning_profile_connection",
+    ),
+    path(
+        "api/v1/reasoning-profiles/settings/",
+        views.reasoning_profile_settings,
+        name="reasoning_profile_settings",
     ),
 ]

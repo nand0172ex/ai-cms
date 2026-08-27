@@ -1,5 +1,8 @@
 import json
+import time
+from urllib.parse import urlparse
 
+import httpx
 from django.core.cache import cache
 from django.http import JsonResponse
 from django.http import StreamingHttpResponse
@@ -8,13 +11,14 @@ from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.models import UserEmbeddingCredential
 from apps.audit.models import AuditEvent
-from apps.ai_providers.models import AIProviderSettings, ProviderType
+from apps.ai_providers.models import AIProviderSettings
 from apps.conversations.models import AssistantRuntimeSettings
 from apps.conversations.models import AIAssistant, Conversation, Message
 from apps.connectors.models import ConnectorSyncRun
 from apps.ingestion.models import DataSource, IngestionJob, UploadedDocument
 from apps.ingestion.tasks import process_ingestion_job
-from apps.knowledge.models import EmbeddingProfile, KnowledgeBase, VectorDBSettings
+from apps.knowledge.models import EmbeddingProfile, KnowledgeBase, QdrantConnection, VectorDBSettings
+from apps.knowledge.services.repository import QdrantRepository
 from apps.retrieval.models import RetrievalProfile
 from apps.workflows.services import RAGWorkflowService
 
@@ -29,6 +33,8 @@ def chat(request):
 
 	prompt = (body.get("prompt") or "").strip()
 	assistant_slug = body.get("assistant_slug")
+	debug_enabled = bool(body.get("debug"))
+	debug_info = {"stage": "request_received"} if debug_enabled else None
 	if not prompt:
 		return JsonResponse({"error": "prompt is required"}, status=400)
 
@@ -62,9 +68,9 @@ def chat(request):
 	Message.objects.create(conversation=conversation, role=Message.Role.USER, content=prompt)
 
 	provider_settings = AIProviderSettings.for_request(request)
+	resolved_reasoning_profile = provider_settings.get_active_reasoning_profile()
 	resolved_llm_model = assistant.llm_model or provider_settings.default_llm_model
 	resolved_retrieval_profile = assistant.retrieval_profile
-	allowed_local_types = {ProviderType.OLLAMA, ProviderType.LOCAL_OPENAI}
 
 	if not resolved_retrieval_profile:
 		profile_qs = RetrievalProfile.objects
@@ -92,31 +98,34 @@ def chat(request):
 			status=400,
 		)
 
-	if not resolved_llm_model:
-		return JsonResponse(
-			{"error": "No LLM model configured. Configure an Ollama/local model in AI Provider settings."},
-			status=400,
-		)
-
-	provider_type = resolved_llm_model.provider.provider_type
-	if provider_type not in allowed_local_types:
+	if not resolved_reasoning_profile and not resolved_llm_model:
 		return JsonResponse(
 			{
-				"error": "Only local LLM providers are allowed for chat. Select Ollama or Local OpenAI-Compatible.",
+				"error": "No reasoning provider configured. Set a default Reasoning Provider Profile in AI Provider settings.",
 			},
 			status=400,
 		)
 
 	try:
+		if debug_info is not None:
+			debug_info["stage"] = "workflow"
+			debug_info["started_at"] = time.time()
 		run = RAGWorkflowService().run(
 			query=prompt,
 			prompt_template=assistant.system_prompt,
 			retrieval_profile=resolved_retrieval_profile,
 			tenant=assistant.tenant,
 			llm_model_config=resolved_llm_model,
+			reasoning_profile=resolved_reasoning_profile,
+			diagnostics=debug_info,
 		)
 	except RuntimeError as exc:
-		return JsonResponse({"error": str(exc)}, status=502)
+		payload = {"error": str(exc)}
+		if debug_info is not None:
+			debug_info["stage"] = debug_info.get("stage") or "failed"
+			debug_info["error"] = str(exc)
+			payload["debug"] = debug_info
+		return JsonResponse(payload, status=502)
 
 	Message.objects.create(
 		conversation=conversation,
@@ -134,14 +143,15 @@ def chat(request):
 		metadata={"assistant": assistant.slug},
 	)
 
-	return JsonResponse(
-		{
-			"conversation_id": conversation.id,
-			"assistant": assistant.slug,
-			"answer": run.response_text,
-			"citations": run.citations,
-		}
-	)
+	response_payload = {
+		"conversation_id": conversation.id,
+		"assistant": assistant.slug,
+		"answer": run.response_text,
+		"citations": run.citations,
+	}
+	if debug_info is not None:
+		response_payload["debug"] = debug_info
+	return JsonResponse(response_payload)
 
 
 @csrf_exempt
@@ -225,6 +235,66 @@ def job_status(request):
 
 
 @require_GET
+def runtime_health(request):
+	provider_settings = AIProviderSettings.for_request(request)
+	vector_settings = VectorDBSettings.for_request(request)
+
+	qdrant = {
+		"status": "unavailable",
+		"url": vector_settings.qdrant_url or "http://localhost:6333",
+		"latency_ms": None,
+		"error": "",
+	}
+
+	try:
+		temp_conn = QdrantConnection(
+			url=qdrant["url"],
+			api_key=vector_settings.qdrant_api_key or "",
+			prefer_grpc=vector_settings.qdrant_prefer_grpc,
+			timeout_seconds=vector_settings.qdrant_timeout_seconds or 30,
+		)
+		repo = QdrantRepository(temp_conn)
+		started = time.perf_counter()
+		repo.ping()
+		qdrant["status"] = "connected"
+		qdrant["latency_ms"] = int((time.perf_counter() - started) * 1000)
+	except Exception as exc:
+		qdrant["error"] = str(exc)
+
+	ollama_url = (provider_settings.ollama_base_url or "http://127.0.0.1:11434/v1").strip().rstrip("/")
+	if ollama_url.endswith("/v1"):
+		ollama_url = ollama_url[: -len("/v1")]
+	ollama_tags_url = f"{ollama_url}/api/tags"
+	hostname = (urlparse(ollama_tags_url).hostname or "").lower()
+	trust_env = hostname not in {"localhost", "127.0.0.1", "0.0.0.0"}
+
+	ollama = {
+		"status": "unavailable",
+		"url": ollama_tags_url,
+		"latency_ms": None,
+		"error": "",
+		"models": [],
+	}
+
+	try:
+		started = time.perf_counter()
+		with httpx.Client(timeout=5, trust_env=trust_env) as client:
+			response = client.get(ollama_tags_url)
+		ollama["latency_ms"] = int((time.perf_counter() - started) * 1000)
+		if response.status_code < 500:
+			payload = response.json() if response.content else {}
+			models = payload.get("models") or []
+			ollama["models"] = [item.get("name") for item in models if item.get("name")]
+			ollama["status"] = "connected"
+		else:
+			ollama["error"] = f"HTTP {response.status_code}"
+	except Exception as exc:
+		ollama["error"] = str(exc)
+
+	return JsonResponse({"qdrant": qdrant, "ollama": ollama})
+
+
+@require_GET
 def error_summary(request):
 	errors = AuditEvent.objects.filter(action__icontains="error").order_by("-created_at")[:50]
 	return JsonResponse(
@@ -278,13 +348,14 @@ def upload_file(request):
 
 	# Optional: record which embedding profile the uploader picked. This is purely
 	# informational metadata today and does not alter embedding/ingestion behavior.
+	provider_settings = AIProviderSettings.for_request(request)
 	embedding_profile_slug = (request.POST.get("embedding_profile_slug") or "").strip()
 	embedding_profile = None
-	if embedding_profile_slug:
+	if provider_settings.enable_embedding_profiles and embedding_profile_slug:
 		embedding_profile = EmbeddingProfile.objects.filter(
 			slug=embedding_profile_slug, is_active=True
 		).first()
-	if not embedding_profile:
+	if provider_settings.enable_embedding_profiles and not embedding_profile:
 		embedding_profile = EmbeddingProfile.objects.filter(is_default=True, is_active=True).first()
 
 	data_source = DataSource.objects.create(

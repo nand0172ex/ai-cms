@@ -16,21 +16,70 @@ class RetrievalService:
             return False
         return True
 
-    def retrieve(self, retrieval_profile, query):
+    def retrieve(self, retrieval_profile, query, diagnostics=None):
         kb = retrieval_profile.knowledge_base
+        collection_name, available, target = self._resolve_live_collection_name(kb)
+        if diagnostics is not None:
+            diagnostics.update(
+                {
+                    "kb_slug": getattr(kb, "slug", ""),
+                    "target_collection": target,
+                    "selected_collection": collection_name,
+                    "available_collections": available,
+                }
+            )
+        if not collection_name:
+            return []
         return self._retrieve_from_qdrant(
             kb=kb,
+            collection_name=collection_name,
             query=query,
             top_k=retrieval_profile.top_k,
             similarity_threshold=retrieval_profile.similarity_threshold,
         )
 
-    def _retrieve_from_qdrant(self, kb, query, top_k, similarity_threshold):
+    def _resolve_live_collection_name(self, kb):
+        """Return a Qdrant collection name that currently exists for retrieval.
+
+        Prefer the retrieval profile's configured KB collection; if it no longer
+        exists in Qdrant, fall back to another active KB collection that does.
+        """
+        service = CollectionManagementService(kb)
+        try:
+            available = sorted(
+                {
+                item.get("name")
+                for item in service.repository.list_collections(include_stats=False)
+                if item.get("name")
+                }
+            )
+        except Exception:
+            return None, [], kb.effective_collection_name
+
+        target = kb.effective_collection_name
+        if target in available:
+            return target, available, target
+
+        from apps.knowledge.models import KnowledgeBase
+
+        sibling_kbs = KnowledgeBase.objects.filter(
+            is_active=True,
+            tenant=kb.tenant,
+        ).order_by("id")
+
+        for candidate in sibling_kbs:
+            candidate_name = candidate.effective_collection_name
+            if candidate_name in available:
+                return candidate_name, available, target
+
+        return None, available, target
+
+    def _retrieve_from_qdrant(self, kb, collection_name, query, top_k, similarity_threshold):
         try:
             service = CollectionManagementService(kb)
             query_vector = text_to_vector(query, kb.vector_size)
             hits = service.repository.search_points(
-                collection_name=kb.effective_collection_name,
+                collection_name=collection_name,
                 query_vector=query_vector,
                 limit=top_k,
                 score_threshold=None,

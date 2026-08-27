@@ -14,5 +14,5 @@ def sync_connector(connector_id):
 def sync_all_active_connectors():
     ids = []
     for connector in ConnectorConfig.objects.filter(is_active=True):
-        ids.append(ConnectorSyncService().run_sync(connector).id)
+        ids.append(ConnectorSyncService().run_sync(connector, force=False).id)
     return ids

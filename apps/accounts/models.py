@@ -1,9 +1,13 @@
 import base64
 import hashlib
+import logging
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.db import models
+
+
+logger = logging.getLogger(__name__)
 
 
 class AbstractBaseModel(models.Model):
@@ -41,7 +45,15 @@ class UserEmbeddingCredential(AbstractBaseModel):
     def get_api_key(self):
         if not self.encrypted_api_key:
             return ""
-        return self._cipher().decrypt(self.encrypted_api_key.encode("ascii")).decode("utf-8")
+        try:
+            return self._cipher().decrypt(self.encrypted_api_key.encode("ascii")).decode("utf-8")
+        except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+            # Keys encrypted with a different FIELD_ENCRYPTION_KEY should not break API responses.
+            logger.warning(
+                "Unable to decrypt embedding credential; treating as missing.",
+                extra={"credential_id": self.pk, "user_id": self.user_id, "profile_id": self.embedding_profile_id},
+            )
+            return ""
 
     @property
     def masked_api_key(self):

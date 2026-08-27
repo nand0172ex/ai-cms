@@ -118,8 +118,61 @@ class VectorDBDashboardService:
         return items[:limit]
 
     def collections_summary(self):
+        """Return live collection rows from the currently configured Qdrant host.
+
+        The dashboard must reflect the active runtime connection, not historical
+        Django records. We therefore list collections from Qdrant first and only
+        enrich each row with matching KnowledgeBase metadata when available.
+        """
+
+        connection = self.connection_status()
+        if not connection["connected"]:
+            return []
+
+        live_collections = self._safe_list_collections()
+        by_effective = {
+            kb.effective_collection_name: kb
+            for kb in KnowledgeBase.objects.select_related("tenant").filter(is_active=True)
+        }
+
         result = []
-        by_effective = {kb.effective_collection_name: kb for kb in KnowledgeBase.objects.select_related("tenant")}
+        for item in live_collections:
+            name = item.get("name")
+            if not name:
+                continue
+
+            stats = item.get("stats") or {}
+            kb = by_effective.get(name)
+
+            qdrant_status = str(stats.get("status") or "unknown").lower()
+            points_count = stats.get("points_count", 0) or 0
+            vectors_count = stats.get("vectors_count", points_count) or 0
+
+            if "green" in qdrant_status or qdrant_status == "ok":
+                health = "connected"
+            elif "red" in qdrant_status or "error" in qdrant_status:
+                health = "error"
+            elif vectors_count > 0:
+                health = "healthy"
+            else:
+                health = "idle"
+
+            result.append(
+                {
+                    "collection": name,
+                    "knowledge_base_slug": kb.slug if kb else "",
+                    "knowledge_base_name": kb.name if kb else "",
+                    "managed_in_django": bool(kb),
+                    "health": health,
+                    "status": stats.get("status") or "unknown",
+                    "vectors_count": vectors_count,
+                    "points_count": points_count,
+                    "vector_size": stats.get("vector_size") or (kb.vector_size if kb else None),
+                }
+            )
+
+        return sorted(result, key=lambda row: row["collection"])
+
     def embedding_monitor(self, user=None):
         jobs = IngestionJob.objects.select_related(
             "document", "document__data_source", "document__data_source__knowledge_base"
@@ -284,6 +337,14 @@ class VectorDBDashboardService:
             for item in ConnectorSyncRun.objects.order_by("connector_id", "-created_at")
             .values("connector_id", "status", "created_at")
         }
+        from apps.connectors.models import ConnectorRecord
+
+        record_counts = {
+            row["connector_id"]: row["total"]
+            for row in ConnectorRecord.objects.filter(is_active=True)
+            .values("connector_id")
+            .annotate(total=Count("id"))
+        }
         return [
             {
                 "connector_id": connector.id,
@@ -293,6 +354,12 @@ class VectorDBDashboardService:
                 "is_active": connector.is_active,
                 "last_sync_status": latest_runs.get(connector.id, {}).get("status"),
                 "last_sync_time": latest_runs.get(connector.id, {}).get("created_at"),
+                "record_count": record_counts.get(connector.id, 0),
+                "sync_mode": (connector.config or {}).get("sync_mode", "incremental"),
+                "sync_interval_minutes": int((connector.config or {}).get("sync_interval_minutes", 30) or 30),
+                "embedding_profile_slug": (connector.config or {}).get("embedding_profile_slug", ""),
+                "auth_type": (connector.config or {}).get("auth_type", "bearer"),
+                "last_cursor": (connector.config or {}).get("last_cursor", ""),
             }
             for connector in connectors
         ]

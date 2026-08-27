@@ -7,7 +7,11 @@ from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_http_methods
 
 from apps.accounts.models import UserEmbeddingCredential
+from apps.ai_providers.models import AIProviderSettings
+from apps.ai_providers.models import ReasoningProviderProfile
 from apps.connectors.models import ConnectorConfig
+from apps.connectors.services import ConnectorRegistry
+from apps.connectors.services import ConnectorSyncService
 from apps.knowledge.models import EmbeddingProfile
 from apps.knowledge.models import KnowledgeBase
 from apps.knowledge.models import VectorDBSettings
@@ -172,6 +176,246 @@ def vector_db_sync_status(request):
 	)
 
 
+def _connector_to_dict(connector):
+	cfg = connector.config or {}
+	embedding_slug = (cfg.get("embedding_profile_slug") or "").strip()
+	embedding_profile = (
+		EmbeddingProfile.objects.filter(slug=embedding_slug, is_active=True).only("name").first()
+		if embedding_slug
+		else None
+	)
+	return {
+		"id": connector.id,
+		"name": connector.name,
+		"connector_type": connector.connector_type,
+		"knowledge_base_slug": connector.knowledge_base.slug if connector.knowledge_base_id else "",
+		"knowledge_base_name": connector.knowledge_base.name if connector.knowledge_base_id else "",
+		"base_url": connector.base_url,
+		"project_key": connector.project_key,
+		"is_active": connector.is_active,
+		"token_env_var": connector.token_env_var,
+		"token_set": bool(connector.get_token()),
+		"token_masked": connector.masked_token,
+		"auth_type": cfg.get("auth_type") or "bearer",
+		"sync_mode": cfg.get("sync_mode") or "incremental",
+		"sync_interval_minutes": int(cfg.get("sync_interval_minutes") or 30),
+		"proxy_url": cfg.get("proxy_url") or "",
+		"embedding_profile_slug": embedding_slug,
+		"embedding_profile_name": embedding_profile.name if embedding_profile else "",
+		"last_cursor": cfg.get("last_cursor") or "",
+		"last_sync_at": cfg.get("last_sync_at") or "",
+		"timeout_seconds": cfg.get("timeout_seconds") or 30,
+		"config": cfg,
+	}
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def vector_db_connectors(request):
+	if request.method == "GET":
+		rows = list(
+			ConnectorConfig.objects.select_related("knowledge_base")
+			.order_by("name")
+		)
+		return JsonResponse({"results": [_connector_to_dict(item) for item in rows]})
+
+	body = _parse_json(request)
+	if body is None:
+		return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+	name = (body.get("name") or "").strip()
+	connector_type = (body.get("connector_type") or "rest_api").strip().lower()
+	kb_slug = (body.get("knowledge_base_slug") or "").strip()
+	base_url = (body.get("base_url") or "").strip()
+	if not name:
+		return JsonResponse({"error": "name is required"}, status=400)
+	if not base_url:
+		return JsonResponse({"error": "base_url is required"}, status=400)
+
+	kb = KnowledgeBase.objects.filter(slug=kb_slug, is_active=True).first() if kb_slug else None
+	if not kb:
+		kb = VectorDBSettings.for_request(request).default_knowledge_base or KnowledgeBase.objects.filter(is_active=True).first()
+	if not kb:
+		return JsonResponse({"error": "No active knowledge base found."}, status=400)
+
+	config = dict(body.get("config") or {})
+	if "auth_type" in body:
+		config["auth_type"] = (body.get("auth_type") or "bearer").strip().lower()
+	if "sync_mode" in body:
+		config["sync_mode"] = (body.get("sync_mode") or "incremental").strip().lower()
+	if "timeout_seconds" in body:
+		try:
+			config["timeout_seconds"] = int(body.get("timeout_seconds") or 30)
+		except (TypeError, ValueError):
+			config["timeout_seconds"] = 30
+	if "sync_interval_minutes" in body:
+		try:
+			interval = int(body.get("sync_interval_minutes") or 30)
+		except (TypeError, ValueError):
+			interval = 30
+		config["sync_interval_minutes"] = 1440 if interval >= 1440 else 30
+	if "proxy_url" in body:
+		config["proxy_url"] = (body.get("proxy_url") or "").strip()
+	if "embedding_profile_slug" in body:
+		emb_slug = (body.get("embedding_profile_slug") or "").strip()
+		if emb_slug:
+			emb = EmbeddingProfile.objects.filter(slug=emb_slug, is_active=True).first()
+			if not emb:
+				return JsonResponse({"error": "Embedding profile not found."}, status=404)
+			config["embedding_profile_slug"] = emb.slug
+		else:
+			config["embedding_profile_slug"] = ""
+
+	connector = ConnectorConfig.objects.create(
+		tenant=None,
+		knowledge_base=kb,
+		name=name,
+		connector_type=connector_type,
+		base_url=base_url,
+		token_env_var=(body.get("token_env_var") or "").strip(),
+		access_token=(body.get("access_token") or "").strip(),
+		project_key=(body.get("project_key") or "").strip(),
+		is_active=bool(body.get("is_active", True)),
+		config=config,
+	)
+	return JsonResponse({"created": True, "connector": _connector_to_dict(connector)}, status=201)
+
+
+@login_required
+@require_http_methods(["GET", "PATCH", "DELETE"])
+def vector_db_connector_detail(request, connector_id):
+	connector = get_object_or_404(ConnectorConfig.objects.select_related("knowledge_base"), id=connector_id)
+	if request.method == "GET":
+		return JsonResponse({"connector": _connector_to_dict(connector)})
+
+	if request.method == "DELETE":
+		connector.delete()
+		return JsonResponse({"deleted": True})
+
+	body = _parse_json(request)
+	if body is None:
+		return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+	if "name" in body:
+		connector.name = (body.get("name") or "").strip() or connector.name
+	if "connector_type" in body:
+		connector.connector_type = (body.get("connector_type") or connector.connector_type).strip().lower()
+	if "base_url" in body:
+		connector.base_url = (body.get("base_url") or "").strip() or connector.base_url
+	if "project_key" in body:
+		connector.project_key = (body.get("project_key") or "").strip()
+	if "token_env_var" in body:
+		connector.token_env_var = (body.get("token_env_var") or "").strip()
+	if "access_token" in body and (body.get("access_token") or "").strip():
+		connector.access_token = (body.get("access_token") or "").strip()
+	if "is_active" in body:
+		connector.is_active = bool(body.get("is_active"))
+	if "knowledge_base_slug" in body:
+		slug = (body.get("knowledge_base_slug") or "").strip()
+		if slug:
+			kb = KnowledgeBase.objects.filter(slug=slug, is_active=True).first()
+			if not kb:
+				return JsonResponse({"error": "Knowledge base not found."}, status=404)
+			connector.knowledge_base = kb
+
+	config = dict(connector.config or {})
+	if "config" in body and isinstance(body.get("config"), dict):
+		config.update(body.get("config") or {})
+	if "auth_type" in body:
+		config["auth_type"] = (body.get("auth_type") or "bearer").strip().lower()
+	if "sync_mode" in body:
+		config["sync_mode"] = (body.get("sync_mode") or "incremental").strip().lower()
+	if "timeout_seconds" in body:
+		try:
+			config["timeout_seconds"] = int(body.get("timeout_seconds") or 30)
+		except (TypeError, ValueError):
+			pass
+	if "sync_interval_minutes" in body:
+		try:
+			interval = int(body.get("sync_interval_minutes") or 30)
+		except (TypeError, ValueError):
+			interval = 30
+		config["sync_interval_minutes"] = 1440 if interval >= 1440 else 30
+	if "proxy_url" in body:
+		config["proxy_url"] = (body.get("proxy_url") or "").strip()
+	if "embedding_profile_slug" in body:
+		emb_slug = (body.get("embedding_profile_slug") or "").strip()
+		if emb_slug:
+			emb = EmbeddingProfile.objects.filter(slug=emb_slug, is_active=True).first()
+			if not emb:
+				return JsonResponse({"error": "Embedding profile not found."}, status=404)
+			config["embedding_profile_slug"] = emb.slug
+		else:
+			config["embedding_profile_slug"] = ""
+	connector.config = config
+	connector.save()
+	return JsonResponse({"updated": True, "connector": _connector_to_dict(connector)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def vector_db_connector_test(request, connector_id):
+	connector = get_object_or_404(ConnectorConfig, id=connector_id)
+	cfg = connector.config or {}
+	log = [
+		f"[TEST] Source: {connector.name} ({connector.connector_type})",
+		f"URL: {connector.base_url}",
+		f"Auth: {cfg.get('auth_type') or 'bearer'}",
+		f"Proxy: {cfg.get('proxy_url') or 'none'}",
+		f"Timeout: {cfg.get('timeout_seconds') or 30}s",
+	]
+	try:
+		client = ConnectorRegistry.get_client(connector)
+		client.test_connection()
+		log.append("Result: connection successful.")
+		return JsonResponse({"available": True, "detail": "Connection successful.", "log": log})
+	except Exception as exc:
+		log.append("Result: connection failed.")
+		log.append(f"Error: {str(exc)}")
+		return JsonResponse({"available": False, "detail": str(exc), "error": str(exc), "log": log}, status=503)
+
+
+@login_required
+@require_http_methods(["POST"])
+def vector_db_connector_sync(request, connector_id):
+	connector = get_object_or_404(ConnectorConfig, id=connector_id)
+	cfg = connector.config or {}
+	log = [
+		f"[SYNC] Source: {connector.name} ({connector.connector_type})",
+		f"Mode: {cfg.get('sync_mode') or 'incremental'}",
+		f"Interval: {cfg.get('sync_interval_minutes') or 30} minute(s)",
+	]
+	try:
+		run = ConnectorSyncService().run_sync(connector)
+		connector.refresh_from_db(fields=["config"])
+		run_detail = run.error_message or "Sync completed."
+		log.extend(
+			[
+				f"Run ID: {run.id}",
+				f"Status: {run.status}",
+				f"Fetched: {run.fetched_count}",
+				f"Indexed: {run.indexed_count}",
+				f"Last cursor: {(connector.config or {}).get('last_cursor') or '-'}",
+				f"Last sync at: {(connector.config or {}).get('last_sync_at') or '-'}",
+				f"Detail: {run_detail}",
+			]
+		)
+		return JsonResponse(
+			{
+				"run_id": run.id,
+				"status": run.status,
+				"fetched_count": run.fetched_count,
+				"indexed_count": run.indexed_count,
+				"detail": run_detail,
+				"log": log,
+			}
+		)
+	except Exception as exc:
+		log.append("Result: sync failed.")
+		log.append(f"Error: {str(exc)}")
+		return JsonResponse({"error": str(exc), "detail": str(exc), "log": log}, status=503)
+
+
 @login_required
 @require_http_methods(["POST"])
 def vector_db_manual_resync(request, connector_id):
@@ -255,7 +499,22 @@ def embedding_profiles(request):
 	Embedding Profile snippet without any code or frontend changes.
 	"""
 
-	profiles = EmbeddingProfile.objects.filter(is_active=True).order_by("sort_order", "name")
+	provider_settings = AIProviderSettings.for_request(request)
+	if not provider_settings.enable_embedding_profiles:
+		return JsonResponse(
+			{
+				"enabled": False,
+				"results": [],
+				"default_slug": "",
+				"message": "Embedding profiles are disabled by AI Provider settings.",
+			}
+		)
+
+	scope = (request.GET.get("scope") or "dashboard").strip().lower()
+	profiles_qs = EmbeddingProfile.objects.filter(is_active=True)
+	if scope != "settings":
+		profiles_qs = profiles_qs.filter(show_on_dashboard=True)
+	profiles = profiles_qs.order_by("sort_order", "name")
 	default_profile = profiles.filter(is_default=True).first()
 	results = []
 	for profile in profiles:
@@ -270,6 +529,7 @@ def embedding_profiles(request):
 		results.append(card)
 	return JsonResponse(
 		{
+			"enabled": True,
 			"results": results,
 			"default_slug": default_profile.slug if default_profile else "",
 		}
@@ -285,7 +545,14 @@ def embedding_profile_connection(request, slug):
 	otherwise the values are only used for a one-off connectivity test.
 	"""
 
-	profile = get_object_or_404(EmbeddingProfile, slug=slug)
+	provider_settings = AIProviderSettings.for_request(request)
+	if not provider_settings.enable_embedding_profiles:
+		return JsonResponse(
+			{"error": "Embedding profiles are disabled in AI Provider settings."},
+			status=403,
+		)
+
+	profile = get_object_or_404(EmbeddingProfile, slug=slug, is_active=True, show_on_dashboard=True)
 	body = _parse_json(request) if request.method == "POST" else {}
 	if body is None:
 		return JsonResponse({"error": "Invalid JSON payload"}, status=400)
@@ -350,6 +617,159 @@ def embedding_profile_connection(request, slug):
 		result["profile"]["api_key_set"] = bool(credential and credential.encrypted_api_key)
 		result["profile"]["api_key_masked"] = credential.masked_api_key if credential else ""
 	return JsonResponse(result)
+
+
+@login_required
+@require_GET
+def reasoning_profiles(request):
+	"""List reasoning provider profiles for dashboard admin cards."""
+
+	provider_settings = AIProviderSettings.for_request(request)
+	if not provider_settings.enable_reasoning_profiles:
+		return JsonResponse(
+			{
+				"enabled": False,
+				"results": [],
+				"default_slug": "",
+				"message": "Reasoning provider profiles are disabled by AI Provider settings.",
+			}
+		)
+
+	scope = (request.GET.get("scope") or "dashboard").strip().lower()
+	profiles_qs = ReasoningProviderProfile.objects.filter(is_active=True)
+	if scope != "settings":
+		profiles_qs = profiles_qs.filter(show_on_dashboard=True)
+	profiles = profiles_qs.order_by("sort_order", "name")
+	selected = provider_settings.get_active_reasoning_profile()
+	results = []
+	for profile in profiles:
+		card = profile.to_card_dict()
+		card["is_selected"] = bool(selected and selected.pk == profile.pk)
+		results.append(card)
+	return JsonResponse(
+		{
+			"enabled": True,
+			"results": results,
+			"default_slug": selected.slug if selected else "",
+		}
+	)
+
+
+@login_required
+@require_http_methods(["POST"])
+def reasoning_profile_connection(request, slug):
+	"""Test/save/select one reasoning provider profile from dashboard modal."""
+
+	provider_settings = AIProviderSettings.for_request(request)
+	if not provider_settings.enable_reasoning_profiles:
+		return JsonResponse(
+			{"error": "Reasoning provider profiles are disabled in AI Provider settings."},
+			status=403,
+		)
+
+	profile = get_object_or_404(ReasoningProviderProfile, slug=slug, is_active=True, show_on_dashboard=True)
+	body = _parse_json(request)
+	if body is None:
+		return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+	endpoint_url = body.get("endpoint_url")
+	model_name = (body.get("model_name") or "").strip() or None
+	api_key = (body.get("api_key") or "").strip() or None
+	timeout_seconds = body.get("timeout_seconds")
+	try:
+		timeout_seconds = int(timeout_seconds) if timeout_seconds not in (None, "") else None
+	except (TypeError, ValueError):
+		timeout_seconds = None
+
+	result = profile.test_connection(
+		endpoint_url=endpoint_url,
+		api_key=api_key,
+		timeout_seconds=timeout_seconds,
+	)
+
+	if body.get("save"):
+		if endpoint_url is not None:
+			profile.endpoint_url = (endpoint_url or "").strip()
+		if model_name:
+			profile.model_name = model_name
+		if api_key:
+			profile.api_key = api_key
+		if timeout_seconds:
+			profile.timeout_seconds = timeout_seconds
+		profile.save()
+		result["saved"] = True
+	else:
+		result["saved"] = False
+
+	if body.get("set_default"):
+		ReasoningProviderProfile.objects.filter(is_default=True).exclude(pk=profile.pk).update(is_default=False)
+		if not profile.is_default:
+			profile.is_default = True
+			profile.save(update_fields=["is_default", "updated_at"])
+
+		runtime_type = AIProviderSettings._reasoning_to_runtime_type(profile.provider_type)
+		provider_settings.default_reasoning_profile = profile
+		provider_settings.active_provider_type = runtime_type
+		provider_settings.save(update_fields=["default_reasoning_profile", "active_provider_type"])
+		result["selected"] = True
+	else:
+		result["selected"] = False
+
+	result["profile"] = profile.to_card_dict()
+	result["default_slug"] = (
+		provider_settings.default_reasoning_profile.slug if provider_settings.default_reasoning_profile_id else ""
+	)
+	return JsonResponse(result)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def reasoning_profile_settings(request):
+	"""Read or update reasoning provider controller settings for AI settings UI."""
+
+	provider_settings = AIProviderSettings.for_request(request)
+
+	if request.method == "POST":
+		body = _parse_json(request)
+		if body is None:
+			return JsonResponse({"error": "Invalid JSON payload"}, status=400)
+
+		if "enable_reasoning_profiles" in body:
+			provider_settings.enable_reasoning_profiles = bool(body.get("enable_reasoning_profiles"))
+
+		if "enable_embedding_profiles" in body:
+			provider_settings.enable_embedding_profiles = bool(body.get("enable_embedding_profiles"))
+
+		if "default_reasoning_profile_slug" in body:
+			slug = (body.get("default_reasoning_profile_slug") or "").strip()
+			if slug:
+				profile = ReasoningProviderProfile.objects.filter(
+					slug=slug,
+					is_active=True,
+					show_on_dashboard=True,
+				).first()
+				if not profile:
+					return JsonResponse({"error": "Reasoning profile not found or not visible."}, status=404)
+				provider_settings.default_reasoning_profile = profile
+				provider_settings.active_provider_type = AIProviderSettings._reasoning_to_runtime_type(
+					profile.provider_type
+				)
+			else:
+				provider_settings.default_reasoning_profile = None
+
+		provider_settings.save()
+
+	active = provider_settings.get_active_reasoning_profile()
+	return JsonResponse(
+		{
+			"enable_reasoning_profiles": provider_settings.enable_reasoning_profiles,
+			"enable_embedding_profiles": provider_settings.enable_embedding_profiles,
+			"active_provider_type": provider_settings.active_provider_type,
+			"active_provider_display": provider_settings.get_active_provider_type_display(),
+			"default_reasoning_profile_slug": active.slug if active else "",
+			"default_reasoning_profile_name": active.name if active else "",
+		}
+	)
 
 
 @login_required

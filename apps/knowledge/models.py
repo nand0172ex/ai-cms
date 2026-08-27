@@ -9,7 +9,6 @@ from django.utils.safestring import mark_safe
 from django.utils.text import slugify
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.contrib.settings.models import BaseSiteSetting, register_setting
-from wagtail.snippets.models import register_snippet
 
 from apps.core.models import AbstractBaseModel
 from apps.knowledge.panels import ReadOnlyPanel
@@ -191,7 +190,6 @@ class KnowledgeBase(AbstractBaseModel):
         return self.collection_name
 
 
-@register_snippet
 class EmbeddingProfile(AbstractBaseModel):
     """Describes an embedding provider option offered during upload.
 
@@ -257,7 +255,16 @@ class EmbeddingProfile(AbstractBaseModel):
     is_default = models.BooleanField(
         default=False, help_text="Used automatically when the uploader does not pick a profile"
     )
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="Active (runtime enabled)",
+        help_text="Turn off to fully disable this provider profile.",
+    )
+    show_on_dashboard = models.BooleanField(
+        default=True,
+        verbose_name="Visible in dashboard",
+        help_text="If disabled, this profile is hidden from Qdrant dashboard provider lists.",
+    )
     sort_order = models.PositiveIntegerField(default=0)
 
     base_url = models.URLField(
@@ -279,6 +286,7 @@ class EmbeddingProfile(AbstractBaseModel):
                 FieldPanel("slug"),
                 FieldPanel("provider_type"),
                 FieldPanel("is_active"),
+                FieldPanel("show_on_dashboard"),
                 FieldPanel("is_default"),
                 FieldPanel("sort_order"),
             ],
@@ -331,6 +339,14 @@ class EmbeddingProfile(AbstractBaseModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def enabled_status(self):
+        return "Visible" if self.show_on_dashboard else "Hidden"
+
+    @property
+    def active_status(self):
+        return "Active" if self.is_active else "Inactive"
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -484,6 +500,8 @@ class EmbeddingProfile(AbstractBaseModel):
             "badges": self.badges,
             "is_default": self.is_default,
             "is_configured": self.is_configured,
+            "show_on_dashboard": self.show_on_dashboard,
+            "is_active": self.is_active,
             "base_url": self.base_url,
             "api_key_set": bool(self.get_api_key()),
             "proxy_url": self.proxy_url,
@@ -915,7 +933,7 @@ class VectorDBSettings(BaseSiteSetting):
 <nav class="vdbx-nav" id="vdbx-nav">
     <button type="button" class="vdbx-tab active" data-target="dashboard" title="Overview and health">Dashboard</button>
     <button type="button" class="vdbx-tab" data-target="collections" title="Create, edit, delete collections">Collections Management</button>
-    <button type="button" class="vdbx-tab" data-target="upload" title="Upload with drag and drop">Data Upload Center</button>
+    <button type="button" class="vdbx-tab" data-target="upload" title="Upload with drag and drop">Data Embedding Hub</button>
     <button type="button" class="vdbx-tab" data-target="sync" title="Connector status and re-sync">Data Source Sync</button>
     <button type="button" class="vdbx-tab" data-target="embedding" title="Embedding model and counters">Embedding Monitor</button>
     <button type="button" class="vdbx-tab" data-target="search" title="Semantic search playground">Search Playground</button>
@@ -934,7 +952,7 @@ class VectorDBSettings(BaseSiteSetting):
         <div class="vdbx-kpis" id="vdbx-kpis"></div>
         <div class="vdbx-quick-actions">
             <button type="button" data-quick="create"><span class="vdbx-quick-icon">+</span><span><strong>Create Collection</strong><small>New vector collection</small></span></button>
-            <button type="button" data-quick="upload"><span class="vdbx-quick-icon">&#8679;</span><span><strong>Upload Data</strong><small>Index documents</small></span></button>
+            <button type="button" data-quick="upload"><span class="vdbx-quick-icon">&#8679;</span><span><strong>Embed Data</strong><small>Chunk and index documents</small></span></button>
             <button type="button" data-quick="sync"><span class="vdbx-quick-icon">&#8644;</span><span><strong>Connect API</strong><small>Sync external data</small></span></button>
             <button type="button" data-quick="search"><span class="vdbx-quick-icon">&#9906;</span><span><strong>Search Playground</strong><small>Test vector search</small></span></button>
         </div>
@@ -1009,8 +1027,82 @@ class VectorDBSettings(BaseSiteSetting):
 
     <div class="vdbx-section" data-section="sync">
         <div class="vdbx-card">
-            <h4>API Connections and Sync Status</h4>
-            <div class="body" id="vdbx-sync-connectors">Loading connectors...</div>
+            <h4>External Source Registry</h4>
+            <div class="body">
+                <p class="vdbx-tip" style="margin:0 0 10px;">Connect Jira, Confluence, or any REST API. Configure authentication, sync mode, and metadata mapping without code changes.</p>
+                <div class="vdbx-row2">
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Source Name
+                        <input class="vdbx-input" id="vdbx-connector-name" placeholder="e.g. Jira Product Backlog" />
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Source Type
+                        <select class="vdbx-select" id="vdbx-connector-type">
+                            <option value="jira">Jira</option>
+                            <option value="confluence">Confluence</option>
+                            <option value="rest_api" selected>REST API</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="vdbx-row2" style="margin-top:8px;">
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Base URL
+                        <input class="vdbx-input" id="vdbx-connector-base-url" placeholder="https://company.atlassian.net or https://api.example.com" />
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Knowledge Base
+                        <select class="vdbx-select" id="vdbx-connector-kb"><option value="">Use default knowledge base</option></select>
+                    </label>
+                </div>
+                <div class="vdbx-row2" style="margin-top:8px;">
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Authentication
+                        <select class="vdbx-select" id="vdbx-connector-auth-type">
+                            <option value="bearer" selected>Bearer Token</option>
+                            <option value="api_key">API Key Header</option>
+                            <option value="basic">Basic Auth</option>
+                            <option value="none">No Authentication</option>
+                        </select>
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Sync Mode
+                        <select class="vdbx-select" id="vdbx-connector-sync-mode">
+                            <option value="incremental" selected>Incremental</option>
+                            <option value="full">Full Re-sync</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="vdbx-row2" style="margin-top:8px;">
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Access Token / API Key
+                        <input class="vdbx-input" id="vdbx-connector-token" placeholder="Leave blank to keep current token on update" />
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Endpoint Path (REST API)
+                        <input class="vdbx-input" id="vdbx-connector-endpoint-path" placeholder="/v1/documents" />
+                    </label>
+                </div>
+                <div class="vdbx-row2" style="margin-top:8px;">
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Proxy URL <span class="vdbx-tip">(optional)</span>
+                        <input class="vdbx-input" id="vdbx-connector-proxy" placeholder="http://proxy.company.com:8080" />
+                    </label>
+                    <div></div>
+                </div>
+                <label style="display:flex; flex-direction:column; gap:5px; margin-top:8px; font-size:11px; color:#41546f; font-weight:600;">Config JSON (optional)
+                    <textarea class="vdbx-textarea" id="vdbx-connector-config" placeholder='{"items_path":"results","id_field":"id","title_field":"title","content_paths":["body","summary"],"url_field":"url","metadata_fields":["updated_at","owner"],"incremental_field":"updated_at"}'></textarea>
+                </label>
+                <div class="vdbx-tools" style="margin-top:10px;">
+                    <button type="button" class="vdbx-btn primary" id="vdbx-connector-save">Save Source</button>
+                    <button type="button" class="vdbx-btn" id="vdbx-connector-test">Test Connection</button>
+                    <button type="button" class="vdbx-btn" id="vdbx-connector-reset">Reset Form</button>
+                </div>
+                <div id="vdbx-connector-status" class="vdbx-tip" style="margin-top:8px;">No source selected.</div>
+                <pre class="vdbx-console open" id="vdbx-connector-console" style="margin-top:8px;">Source console ready. Run Test Connection or Sync to view logs.</pre>
+                <div class="vdbx-row2" style="margin-top:8px;">
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Embedding Provider
+                        <select class="vdbx-select" id="vdbx-connector-embedding"><option value="">Use default embedding</option></select>
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:5px; font-size:11px; color:#41546f; font-weight:600;">Run every
+                        <select class="vdbx-select" id="vdbx-connector-interval">
+                            <option value="30" selected>Every 30 minutes</option>
+                            <option value="1440">Every 24 hours</option>
+                        </select>
+                    </label>
+                </div>
+                <div style="margin-top:14px;" id="vdbx-sync-connectors">Loading connectors...</div>
+            </div>
         </div>
         <div class="vdbx-card">
             <h4>Sync History</h4>
@@ -1191,6 +1283,25 @@ class VectorDBSettings(BaseSiteSetting):
 const shell = document.getElementById("vdbx-shell");
 if (!shell) return;
 
+function hideFooterSaveButton() {
+const footer = document.querySelector('nav[aria-label="Actions (footer)"], nav.actions--primary.footer__container, nav.footer__container');
+if (!footer) return false;
+footer.style.display = 'none';
+return true;
+}
+
+if (!hideFooterSaveButton()) {
+window.setTimeout(hideFooterSaveButton, 120);
+window.setTimeout(hideFooterSaveButton, 500);
+let attempts = 0;
+const timer = window.setInterval(function(){
+    attempts += 1;
+    if (hideFooterSaveButton() || attempts >= 20) {
+        window.clearInterval(timer);
+    }
+}, 250);
+}
+
 const tabs = shell.querySelectorAll(".vdbx-tab");
 const sections = shell.querySelectorAll(".vdbx-section");
 
@@ -1212,8 +1323,14 @@ async function api(url, options) {
     const res = await fetch(url, requestOptions);
 let payload = {};
 try { payload = await res.json(); } catch (_e) { payload = {}; }
-if (!res.ok) throw new Error(payload.error || ("Request failed: " + res.status));
+if (!res.ok) throw new Error(payload.error || payload.detail || ("Request failed: " + res.status));
 return payload;
+}
+
+function bindEvent(id, eventName, handler) {
+const el = document.getElementById(id);
+if (el) el.addEventListener(eventName, handler);
+return el;
 }
 
 function setActive(target) {
@@ -1284,25 +1401,31 @@ try {
     const data = await api("/api/v1/vector-db/collections/");
     const rows = data.results || [];
     if (!rows.length) {
-        table.innerHTML = '<span class="vdbx-tip">No collections found.</span>';
+        table.innerHTML = '<span class="vdbx-tip">No collections found on the currently connected Qdrant host.</span>';
         return;
     }
     table.innerHTML = '<table class="vdbx-table"><thead><tr>' +
         '<th>Collection</th><th>Health</th><th>Vectors</th><th>Docs</th><th>Dimension</th><th>Actions</th>' +
         '</tr></thead><tbody>' +
         rows.map((r) =>
+            (function() {
+            const slug = r.knowledge_base_slug || "";
+            const actions = slug
+                ? ('<button class="vdbx-btn" data-action="stats" data-slug="' + slug + '">Stats</button> ' +
+                   '<button class="vdbx-btn" data-action="edit" data-slug="' + slug + '">Edit</button> ' +
+                   '<button class="vdbx-btn" data-action="delete" data-slug="' + slug + '">Delete</button>')
+                : '<span class="vdbx-tip">Live collection only</span>';
+            return (
             '<tr>' +
             '<td><strong>' + (r.collection || '-') + '</strong><br><span class="vdbx-tip">KB: ' + (r.knowledge_base_slug || '-') + '</span></td>' +
             '<td><span class="vdbx-badge ' + badgeClass(r.health) + '">' + (r.health || 'unknown') + '</span></td>' +
             '<td>' + (r.vectors_count || 0) + '</td>' +
             '<td>' + (r.points_count || 0) + '</td>' +
             '<td>' + (r.vector_size || '-') + '</td>' +
-            '<td>' +
-                '<button class="vdbx-btn" data-action="stats" data-slug="' + (r.knowledge_base_slug || '') + '">Stats</button> ' +
-                '<button class="vdbx-btn" data-action="edit" data-slug="' + (r.knowledge_base_slug || '') + '">Edit</button> ' +
-                '<button class="vdbx-btn" data-action="delete" data-slug="' + (r.knowledge_base_slug || '') + '">Delete</button>' +
-            '</td>' +
+            '<td>' + actions + '</td>' +
             '</tr>'
+            );
+            })()
         ).join('') + '</tbody></table>';
     const overview = document.getElementById("vdbx-collections-overview");
     if (overview) overview.innerHTML = table.innerHTML;
@@ -1391,10 +1514,10 @@ function createCollectionFlow() {
     openModal("create", null);
 }
 
-document.getElementById("vdbx-modal-close").addEventListener("click", closeModal);
-document.getElementById("vdbx-modal-cancel").addEventListener("click", closeModal);
-document.getElementById("vdbx-modal-submit").addEventListener("click", submitModal);
-modalOverlay.addEventListener("click", (event) => { if (event.target === modalOverlay) closeModal(); });
+bindEvent("vdbx-modal-close", "click", closeModal);
+bindEvent("vdbx-modal-cancel", "click", closeModal);
+bindEvent("vdbx-modal-submit", "click", submitModal);
+if (modalOverlay) modalOverlay.addEventListener("click", (event) => { if (event.target === modalOverlay) closeModal(); });
 
 async function collectionAction(action, slug) {
 if (!slug) return;
@@ -1526,35 +1649,179 @@ zone.addEventListener("drop", (e) => {
 async function loadSync() {
 const conn = document.getElementById("vdbx-sync-connectors");
 const hist = document.getElementById("vdbx-sync-history");
+const statusEl = document.getElementById("vdbx-connector-status");
 try {
-    const data = await api("/api/v1/vector-db/sync/status/");
-    const connectors = data.connectors || [];
-    const history = data.sync_history || [];
+    const [registryData, syncData] = await Promise.all([
+        api("/api/v1/vector-db/connectors/"),
+        api("/api/v1/vector-db/sync/status/"),
+    ]);
+    const connectors = registryData.results || [];
+    const history = syncData.sync_history || [];
 
     if (!connectors.length) {
-        conn.innerHTML = '<span class="vdbx-tip">No active connectors.</span>';
+        conn.innerHTML = '<span class="vdbx-tip">No sources configured yet. Add your first source above.</span>';
     } else {
-        conn.innerHTML = '<table class="vdbx-table"><thead><tr><th>Connector</th><th>Type</th><th>Status</th><th>Last Sync</th><th>Action</th></tr></thead><tbody>' +
+        conn.innerHTML = '<table class="vdbx-table"><thead><tr><th>Source</th><th>Type</th><th>Embedding</th><th>Schedule</th><th>Records</th><th>Last Sync</th><th>Actions</th></tr></thead><tbody>' +
             connectors.map((c) => '<tr>' +
-                '<td>' + c.name + '</td>' +
+                '<td><strong>' + c.name + '</strong><br><span class="vdbx-tip">' + (c.knowledge_base_slug || '-') + '</span></td>' +
                 '<td>' + c.connector_type + '</td>' +
-                '<td><span class="vdbx-badge ' + badgeClass(c.last_sync_status || 'gray') + '">' + (c.last_sync_status || 'unknown') + '</span></td>' +
-                '<td>' + (c.last_sync_time || '-') + '</td>' +
-                '<td><button class="vdbx-btn" data-resync="' + c.connector_id + '">Manual Re-Sync</button></td>' +
+            '<td>' + (c.embedding_profile_name || c.embedding_profile_slug || 'default') + '</td>' +
+            '<td>' + ((Number(c.sync_interval_minutes || 30) >= 1440) ? '24h' : '30m') + '<br><span class="vdbx-tip">' + (c.sync_mode || 'incremental') + '</span></td>' +
+                '<td>' + (c.record_count || 0) + '</td>' +
+                '<td><span class="vdbx-badge ' + badgeClass(c.last_sync_status || 'gray') + '">' + (c.last_sync_status || 'unknown') + '</span><br><span class="vdbx-tip">' + (c.last_sync_time || '-') + '</span></td>' +
+                '<td>' +
+                    '<button class="vdbx-btn" data-edit-connector="' + c.id + '">Edit</button> ' +
+                    '<button class="vdbx-btn" data-test-connector="' + c.id + '">Test</button> ' +
+                    '<button class="vdbx-btn" data-sync-connector="' + c.id + '">Sync</button> ' +
+                    '<button class="vdbx-btn" data-delete-connector="' + c.id + '">Delete</button>' +
+                '</td>' +
             '</tr>').join('') + '</tbody></table>';
     }
 
     if (!history.length) {
         hist.innerHTML = '<span class="vdbx-tip">No sync history.</span>';
     } else {
-        hist.innerHTML = '<table class="vdbx-table"><thead><tr><th>Connector</th><th>Status</th><th>Fetched</th><th>Indexed</th><th>Time</th></tr></thead><tbody>' +
+        hist.innerHTML = '<table class="vdbx-table"><thead><tr><th>Source</th><th>Status</th><th>Fetched</th><th>Indexed</th><th>Time</th></tr></thead><tbody>' +
             history.map((h) => '<tr><td>' + h.connector + '</td><td><span class="vdbx-badge ' + badgeClass(h.status) + '">' + h.status + '</span></td><td>' + (h.fetched_count || 0) + '</td><td>' + (h.indexed_count || 0) + '</td><td>' + (h.created_at || '-') + '</td></tr>').join('') +
             '</tbody></table>';
     }
+    if (statusEl && !statusEl.textContent) statusEl.textContent = "Ready.";
 } catch (err) {
     conn.innerHTML = '<span class="vdbx-badge vdbx-red">Error</span> ' + err.message;
     hist.innerHTML = '<span class="vdbx-badge vdbx-red">Error</span> ' + err.message;
 }
+}
+
+let editingConnectorId = null;
+
+function setConnectorConsoleLines(lines) {
+    const consoleEl = document.getElementById("vdbx-connector-console");
+    if (!consoleEl) return;
+    const normalized = (lines || []).map((line) => String(line || "")).filter(Boolean);
+    consoleEl.classList.add("open");
+    consoleEl.textContent = normalized.length ? normalized.join("\\n") : "No operation log returned.";
+}
+
+function appendConnectorConsoleLine(line) {
+    const consoleEl = document.getElementById("vdbx-connector-console");
+    if (!consoleEl) return;
+    const ts = new Date().toISOString();
+    const next = "[" + ts + "] " + String(line || "");
+    consoleEl.classList.add("open");
+    if (!consoleEl.textContent || consoleEl.textContent.indexOf("Source console ready") === 0) {
+        consoleEl.textContent = next;
+    } else {
+        consoleEl.textContent = consoleEl.textContent + "\\n" + next;
+    }
+}
+
+function readConnectorConfigJson() {
+    const raw = (document.getElementById("vdbx-connector-config").value || "").trim();
+    if (!raw) return {};
+    return JSON.parse(raw);
+}
+
+function setConnectorForm(data) {
+    const c = data || {};
+    const cfg = c.config || {};
+    document.getElementById("vdbx-connector-name").value = c.name || "";
+    document.getElementById("vdbx-connector-type").value = c.connector_type || "rest_api";
+    document.getElementById("vdbx-connector-base-url").value = c.base_url || "";
+    document.getElementById("vdbx-connector-kb").value = c.knowledge_base_slug || "";
+    document.getElementById("vdbx-connector-auth-type").value = c.auth_type || cfg.auth_type || "bearer";
+    document.getElementById("vdbx-connector-sync-mode").value = c.sync_mode || cfg.sync_mode || "incremental";
+    document.getElementById("vdbx-connector-token").value = "";
+    document.getElementById("vdbx-connector-proxy").value = c.proxy_url || cfg.proxy_url || "";
+    document.getElementById("vdbx-connector-endpoint-path").value = cfg.endpoint_path || "";
+    document.getElementById("vdbx-connector-embedding").value = c.embedding_profile_slug || cfg.embedding_profile_slug || "";
+    document.getElementById("vdbx-connector-interval").value = String(c.sync_interval_minutes || cfg.sync_interval_minutes || 30);
+    document.getElementById("vdbx-connector-config").value = Object.keys(cfg).length ? JSON.stringify(cfg, null, 2) : "";
+}
+
+function collectConnectorPayload() {
+    const cfg = readConnectorConfigJson();
+    const endpointPath = (document.getElementById("vdbx-connector-endpoint-path").value || "").trim();
+    if (endpointPath) cfg.endpoint_path = endpointPath;
+    else delete cfg.endpoint_path;
+    const proxyUrl = (document.getElementById("vdbx-connector-proxy").value || "").trim();
+    if (proxyUrl) cfg.proxy_url = proxyUrl;
+    else delete cfg.proxy_url;
+    const payload = {
+        name: (document.getElementById("vdbx-connector-name").value || "").trim(),
+        connector_type: (document.getElementById("vdbx-connector-type").value || "rest_api").trim(),
+        base_url: (document.getElementById("vdbx-connector-base-url").value || "").trim(),
+        knowledge_base_slug: (document.getElementById("vdbx-connector-kb").value || "").trim(),
+        auth_type: (document.getElementById("vdbx-connector-auth-type").value || "bearer").trim(),
+        sync_mode: (document.getElementById("vdbx-connector-sync-mode").value || "incremental").trim(),
+        sync_interval_minutes: Number(document.getElementById("vdbx-connector-interval").value || "30"),
+        embedding_profile_slug: (document.getElementById("vdbx-connector-embedding").value || "").trim(),
+        access_token: (document.getElementById("vdbx-connector-token").value || "").trim(),
+        proxy_url: proxyUrl,
+        config: cfg,
+    };
+    return payload;
+}
+
+async function saveConnector() {
+    const statusEl = document.getElementById("vdbx-connector-status");
+    try {
+        appendConnectorConsoleLine("Saving source configuration...");
+        const payload = collectConnectorPayload();
+        if (!payload.name || !payload.base_url) {
+            statusEl.textContent = "Name and Base URL are required.";
+            statusEl.style.color = "#8b1e24";
+            appendConnectorConsoleLine("Save blocked: Name and Base URL are required.");
+            return;
+        }
+        const isEdit = !!editingConnectorId;
+        const url = isEdit
+            ? "/api/v1/vector-db/connectors/" + editingConnectorId + "/"
+            : "/api/v1/vector-db/connectors/";
+        const method = isEdit ? "PATCH" : "POST";
+        const data = await api(url, {
+            method,
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify(payload),
+        });
+        editingConnectorId = null;
+        setConnectorForm({});
+        statusEl.textContent = isEdit
+            ? "Source updated successfully."
+            : "Source created successfully.";
+        statusEl.style.color = "#17663b";
+        appendConnectorConsoleLine(statusEl.textContent);
+        await loadSync();
+        if (!isEdit && data.connector && data.connector.id) {
+            appendConnectorConsoleLine("Running initial sync for new source #" + data.connector.id + "...");
+            const syncData = await api("/api/v1/vector-db/connectors/" + data.connector.id + "/sync/", { method: "POST" });
+            setConnectorConsoleLines(syncData.log || ["Initial sync completed."]);
+            await loadSync();
+        }
+    } catch (err) {
+        statusEl.textContent = "Save failed: " + err.message;
+        statusEl.style.color = "#8b1e24";
+        appendConnectorConsoleLine(statusEl.textContent);
+    }
+}
+
+async function testConnectorConnection() {
+    const statusEl = document.getElementById("vdbx-connector-status");
+    if (!editingConnectorId) {
+        statusEl.textContent = "Save the source first, then run Test Connection.";
+        statusEl.style.color = "#8b1e24";
+        appendConnectorConsoleLine(statusEl.textContent);
+        return;
+    }
+    try {
+        const data = await api("/api/v1/vector-db/connectors/" + editingConnectorId + "/test/", { method: "POST" });
+        statusEl.textContent = data.detail || "Connection successful.";
+        statusEl.style.color = "#17663b";
+        setConnectorConsoleLines(data.log || [statusEl.textContent]);
+    } catch (err) {
+        statusEl.textContent = "Connection failed: " + err.message;
+        statusEl.style.color = "#8b1e24";
+        appendConnectorConsoleLine(statusEl.textContent);
+    }
 }
 
 async function loadEmbedding() {
@@ -1669,10 +1936,83 @@ const syncBtn = evt.target.closest("button[data-resync]");
 if (syncBtn) {
     const id = syncBtn.getAttribute("data-resync");
     try {
-        await api("/api/v1/vector-db/sync/" + id + "/resync/", { method: "POST" });
+        const data = await api("/api/v1/vector-db/sync/" + id + "/resync/", { method: "POST" });
+        setConnectorConsoleLines([
+            "[MANUAL RESYNC] Connector #" + id,
+            "Status: " + (data.status || "triggered"),
+            "Fetched: " + (data.fetched_count || 0),
+            "Indexed: " + (data.indexed_count || 0),
+            "Detail: " + (data.detail || "Re-sync triggered."),
+        ]);
         await loadSync();
     } catch (err) {
+        appendConnectorConsoleLine("Re-sync failed: " + err.message);
         window.alert("Re-sync failed: " + err.message);
+    }
+    return;
+}
+const editConnectorBtn = evt.target.closest("button[data-edit-connector]");
+if (editConnectorBtn) {
+    const id = editConnectorBtn.getAttribute("data-edit-connector");
+    try {
+        const data = await api("/api/v1/vector-db/connectors/" + id + "/");
+        editingConnectorId = id;
+        setConnectorForm(data.connector || {});
+        const statusEl = document.getElementById("vdbx-connector-status");
+        statusEl.textContent = "Editing source #" + id + ". Save to apply changes.";
+        statusEl.style.color = "#224774";
+        appendConnectorConsoleLine("Loaded source #" + id + " into the form.");
+    } catch (err) {
+        window.alert("Unable to load source: " + err.message);
+    }
+    return;
+}
+const testConnectorBtn = evt.target.closest("button[data-test-connector]");
+if (testConnectorBtn) {
+    const id = testConnectorBtn.getAttribute("data-test-connector");
+    try {
+        const data = await api("/api/v1/vector-db/connectors/" + id + "/test/", { method: "POST" });
+        const statusEl = document.getElementById("vdbx-connector-status");
+        statusEl.textContent = "Source test success: " + (data.detail || "Connection successful.");
+        statusEl.style.color = "#17663b";
+        setConnectorConsoleLines(data.log || [statusEl.textContent]);
+    } catch (err) {
+        const statusEl = document.getElementById("vdbx-connector-status");
+        statusEl.textContent = "Source test failed: " + err.message;
+        statusEl.style.color = "#8b1e24";
+        appendConnectorConsoleLine(statusEl.textContent);
+    }
+    return;
+}
+const syncConnectorBtn = evt.target.closest("button[data-sync-connector]");
+if (syncConnectorBtn) {
+    const id = syncConnectorBtn.getAttribute("data-sync-connector");
+    try {
+        const data = await api("/api/v1/vector-db/connectors/" + id + "/sync/", { method: "POST" });
+        const statusEl = document.getElementById("vdbx-connector-status");
+        statusEl.textContent = "Source sync status: " + (data.status || "completed");
+        statusEl.style.color = String(data.status || "").toLowerCase() === "failed" ? "#8b1e24" : "#17663b";
+        setConnectorConsoleLines(data.log || [statusEl.textContent]);
+        await Promise.all([loadSync(), loadDashboard()]);
+    } catch (err) {
+        appendConnectorConsoleLine("Sync failed: " + err.message);
+        window.alert("Sync failed: " + err.message);
+    }
+    return;
+}
+const deleteConnectorBtn = evt.target.closest("button[data-delete-connector]");
+if (deleteConnectorBtn) {
+    const id = deleteConnectorBtn.getAttribute("data-delete-connector");
+    if (!window.confirm("Delete this source configuration?")) return;
+    try {
+        await api("/api/v1/vector-db/connectors/" + id + "/", { method: "DELETE" });
+        if (String(editingConnectorId || "") === String(id)) {
+            editingConnectorId = null;
+            setConnectorForm({});
+        }
+        await loadSync();
+    } catch (err) {
+        window.alert("Delete failed: " + err.message);
     }
     return;
 }
@@ -1697,22 +2037,33 @@ if (configureBtn) {
 }
 });
 
-document.getElementById("vdbx-search-run").addEventListener("click", runSearch);
-document.getElementById("vdbx-create-collection").addEventListener("click", createCollectionFlow);
-document.getElementById("vdbx-collections-refresh").addEventListener("click", loadCollections);
-document.getElementById("vdbx-refresh-all").addEventListener("click", async () => {
+bindEvent("vdbx-search-run", "click", runSearch);
+bindEvent("vdbx-create-collection", "click", createCollectionFlow);
+bindEvent("vdbx-collections-refresh", "click", loadCollections);
+bindEvent("vdbx-connector-save", "click", saveConnector);
+bindEvent("vdbx-connector-test", "click", testConnectorConnection);
+bindEvent("vdbx-connector-reset", "click", () => {
+    editingConnectorId = null;
+    setConnectorForm({});
+    const statusEl = document.getElementById("vdbx-connector-status");
+    statusEl.textContent = "Form reset. Ready for new source.";
+    statusEl.style.color = "#224774";
+    setConnectorConsoleLines(["Source console ready. Run Test Connection or Sync to view logs."]);
+});
+bindEvent("vdbx-refresh-all", "click", async () => {
 await Promise.all([loadDashboard(), loadCollections(), loadUploads(), loadSync(), loadEmbedding(), loadMonitoring()]);
 });
 
 const compareModal = document.getElementById("vdbx-compare-modal");
-document.getElementById("vdbx-compare-providers").addEventListener("click", () => {
-document.getElementById("vdbx-compare-body").innerHTML = buildCompareTable();
-compareModal.classList.add("open");
+bindEvent("vdbx-compare-providers", "click", () => {
+const bodyEl = document.getElementById("vdbx-compare-body");
+if (bodyEl) bodyEl.innerHTML = buildCompareTable();
+if (compareModal) compareModal.classList.add("open");
 });
-document.getElementById("vdbx-compare-close").addEventListener("click", () => compareModal.classList.remove("open"));
-document.getElementById("vdbx-compare-done").addEventListener("click", () => compareModal.classList.remove("open"));
-compareModal.addEventListener("click", (event) => { if (event.target === compareModal) compareModal.classList.remove("open"); });
-document.getElementById("vdbx-upload-embedding").addEventListener("change", (event) => {
+bindEvent("vdbx-compare-close", "click", () => { if (compareModal) compareModal.classList.remove("open"); });
+bindEvent("vdbx-compare-done", "click", () => { if (compareModal) compareModal.classList.remove("open"); });
+if (compareModal) compareModal.addEventListener("click", (event) => { if (event.target === compareModal) compareModal.classList.remove("open"); });
+bindEvent("vdbx-upload-embedding", "change", (event) => {
 highlightSelectedProvider(event.target.value);
 });
 
@@ -1797,16 +2148,16 @@ try {
 }
 }
 
-document.getElementById("vdbx-provider-conn-close").addEventListener("click", () => providerConnModal.classList.remove("open"));
-document.getElementById("vdbx-provider-conn-test").addEventListener("click", () => submitProviderConnection(false));
-document.getElementById("vdbx-provider-conn-save").addEventListener("click", () => submitProviderConnection(true));
-document.getElementById("vdbx-provider-conn-console-btn").addEventListener("click", async () => {
+bindEvent("vdbx-provider-conn-close", "click", () => { if (providerConnModal) providerConnModal.classList.remove("open"); });
+bindEvent("vdbx-provider-conn-test", "click", () => submitProviderConnection(false));
+bindEvent("vdbx-provider-conn-save", "click", () => submitProviderConnection(true));
+bindEvent("vdbx-provider-conn-console-btn", "click", async () => {
 const consoleEl = document.getElementById("vdbx-provider-conn-console");
 consoleEl.classList.add("open");
 consoleEl.textContent = "Running diagnostic request...";
 await submitProviderConnection(false);
 });
-providerConnModal.addEventListener("click", (event) => { if (event.target === providerConnModal) providerConnModal.classList.remove("open"); });
+if (providerConnModal) providerConnModal.addEventListener("click", (event) => { if (event.target === providerConnModal) providerConnModal.classList.remove("open"); });
 
 async function loadKnowledgeBaseOptions() {
 try {
@@ -1814,16 +2165,35 @@ try {
     const kbs = data.results || [];
     const uploadSelect = document.getElementById("vdbx-upload-kb");
     const connSelect = document.getElementById("vdbx-conn-default-kb");
+    const connectorKbSelect = document.getElementById("vdbx-connector-kb");
     const uploadOptions = ['<option value="">Use default collection</option>'].concat(
         kbs.map((kb) => '<option value="' + kb.slug + '">' + kb.name + ' (' + kb.collection + ')</option>')
     ).join('');
     const connOptions = ['<option value="">No default</option>'].concat(
         kbs.map((kb) => '<option value="' + kb.slug + '">' + kb.name + ' (' + kb.collection + ')</option>')
     ).join('');
+    const connectorOptions = ['<option value="">Use default knowledge base</option>'].concat(
+        kbs.map((kb) => '<option value="' + kb.slug + '">' + kb.name + ' (' + kb.collection + ')</option>')
+    ).join('');
     if (uploadSelect) uploadSelect.innerHTML = uploadOptions;
     if (connSelect) connSelect.innerHTML = connOptions;
+    if (connectorKbSelect) connectorKbSelect.innerHTML = connectorOptions;
 } catch (err) {
     /* Selects fall back to the default-only option if this fails. */
+}
+}
+
+async function loadConnectorEmbeddingOptions() {
+try {
+    const data = await api("/api/v1/embedding-profiles/?scope=settings");
+    const rows = data.results || [];
+    const select = document.getElementById("vdbx-connector-embedding");
+    if (!select) return;
+    select.innerHTML = ['<option value="">Use default embedding</option>']
+        .concat(rows.map((r) => '<option value="' + r.slug + '">' + r.name + ' (' + (r.provider_type_display || r.provider_type || '-') + ')</option>'))
+        .join('');
+} catch (_err) {
+    /* Keep default option if unavailable */
 }
 }
 
@@ -1895,10 +2265,21 @@ const cardsEl = document.getElementById("vdbx-provider-cards");
 const selectEl = document.getElementById("vdbx-upload-embedding");
 try {
     const data = await api("/api/v1/embedding-profiles/");
+    if (data.enabled === false) {
+        embeddingProfilesCache = [];
+        if (selectEl) {
+            selectEl.innerHTML = '<option value="">Embedding profiles disabled</option>';
+            selectEl.disabled = true;
+        }
+        cardsEl.innerHTML = '<span class="vdbx-tip">Embedding provider profiles are disabled from AI Provider settings.</span>';
+        return;
+    }
+
     embeddingProfilesCache = data.results || [];
     const defaultSlug = data.default_slug || "";
 
     if (selectEl) {
+        selectEl.disabled = false;
         selectEl.innerHTML = ['<option value="">Use default embedding</option>'].concat(
             embeddingProfilesCache.map((p) => '<option value="' + p.slug + '">' + p.name + '</option>')
         ).join('');
@@ -1996,12 +2377,13 @@ try {
 }
 }
 
-document.getElementById("vdbx-conn-test").addEventListener("click", () => testOrSaveConnection(false));
-document.getElementById("vdbx-conn-save").addEventListener("click", () => testOrSaveConnection(true));
-document.getElementById("vdbx-connection-shortcut").addEventListener("click", () => setActive("connection"));
+bindEvent("vdbx-conn-test", "click", () => testOrSaveConnection(false));
+bindEvent("vdbx-conn-save", "click", () => testOrSaveConnection(true));
+bindEvent("vdbx-connection-shortcut", "click", () => setActive("connection"));
 
 bindUpload();
 loadKnowledgeBaseOptions();
+loadConnectorEmbeddingOptions();
 loadEmbeddingProfiles();
 loadConnection();
 Promise.all([loadDashboard(), loadCollections(), loadUploads(), loadSync(), loadEmbedding(), loadMonitoring()]);
@@ -2015,5 +2397,5 @@ Promise.all([loadDashboard(), loadCollections(), loadUploads(), loadSync(), load
         )
 
     class Meta:
-        verbose_name = "Qdrant Dashboard"
-        verbose_name_plural = "Qdrant Dashboard"
+        verbose_name = "Vector DB"
+        verbose_name_plural = "Vector DB"
